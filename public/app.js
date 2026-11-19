@@ -10,6 +10,7 @@ import {
   checkRedirectResult,
   signInWithEmail, 
   registerWithEmail, 
+  signInAsGuest,
   logOut, 
   onAuthUserChanged,
   sendMessageToFirestore,
@@ -93,7 +94,8 @@ const state = {
     avatar: localStorage.getItem('pulsechat_avatar') || '⚡',
     status: 'online',
     room: 'general',
-    isAuth: false
+    isAuth: false,
+    isGuest: false
   },
   currentRoom: DEFAULT_ROOMS[0],
   rooms: [...DEFAULT_ROOMS],
@@ -107,9 +109,13 @@ const state = {
   unreadWhileScrolled: 0,
   typingTimeout: null,
   isTyping: false,
+  isSending: false,
   unsubscribeMessages: null,
   unsubscribeTyping: null,
-  lastRenderedMessageCount: 0
+  unsubscribeRooms: null,
+  unsubscribeUsers: null,
+  presenceCleanupRegistered: false,
+  lastRenderedMessageId: null
 };
 
 // --- DOM Elements ---
@@ -256,6 +262,7 @@ function connectAndJoinRoom(userData, targetRoomId = 'general') {
   state.currentUser.email = userData.email || null;
   state.currentUser.uid = userData.uid || null;
   state.currentUser.isAuth = Boolean(userData.uid);
+  state.currentUser.isGuest = Boolean(userData.isGuest);
 
   localStorage.setItem('pulsechat_username', userData.username);
   localStorage.setItem('pulsechat_avatar', userData.avatar);
@@ -266,16 +273,23 @@ function connectAndJoinRoom(userData, targetRoomId = 'general') {
   clearAuthError();
 
   // Listen to custom rooms
-  listenToCustomRooms((customRooms) => {
+  if (state.unsubscribeRooms) state.unsubscribeRooms();
+  state.unsubscribeRooms = listenToCustomRooms((customRooms) => {
     const map = new Map();
     DEFAULT_ROOMS.forEach(r => map.set(r.id, r));
     customRooms.forEach(r => map.set(r.id, r));
+    state.rooms.forEach(r => {
+      if (!map.has(r.id) && !DEFAULT_ROOMS.some(defaultRoom => defaultRoom.id === r.id)) {
+        map.set(r.id, r);
+      }
+    });
     state.rooms = Array.from(map.values());
     renderChannelList();
   });
 
   // Listen to online users
-  listenToOnlineUsers((onlineUsers) => {
+  if (state.unsubscribeUsers) state.unsubscribeUsers();
+  state.unsubscribeUsers = listenToOnlineUsers((onlineUsers) => {
     state.users = onlineUsers;
     renderMembersList();
   });
@@ -285,9 +299,12 @@ function connectAndJoinRoom(userData, targetRoomId = 'general') {
 
   // Update presence in Firestore
   updateUserPresence(state.currentUser, true);
-  window.addEventListener('beforeunload', () => {
-    updateUserPresence(state.currentUser, false);
-  });
+  if (!state.presenceCleanupRegistered) {
+    window.addEventListener('beforeunload', () => {
+      updateUserPresence(state.currentUser, false);
+    });
+    state.presenceCleanupRegistered = true;
+  }
 
   el.messageTextInput.focus();
 }
@@ -295,28 +312,34 @@ function connectAndJoinRoom(userData, targetRoomId = 'general') {
 // --- Room Switching with Real-Time Firestore Sync ---
 function switchRoom(roomId) {
   const target = state.rooms.find(r => r.id === roomId) || DEFAULT_ROOMS[0];
+  const previousRoomId = state.currentRoom && state.currentRoom.id;
+
+  if (state.typingTimeout) {
+    clearTimeout(state.typingTimeout);
+    state.typingTimeout = null;
+  }
+  if (previousRoomId && (previousRoomId !== target.id || state.isTyping) && state.currentUser.username) {
+    setFirestoreTyping(previousRoomId, state.currentUser.username, false);
+  }
+  state.isTyping = false;
+
   state.currentRoom = target;
   state.currentUser.room = target.id;
 
   renderCurrentRoomHeader();
   renderChannelList();
 
-  // Clear typing for old room
-  if (state.currentUser.username) {
-    setFirestoreTyping(state.currentRoom.id, state.currentUser.username, false);
-  }
-
   // Subscribe to real-time messages in this room
   if (state.unsubscribeMessages) state.unsubscribeMessages();
-  state.lastRenderedMessageCount = 0;
+  state.lastRenderedMessageId = null;
 
   state.unsubscribeMessages = listenToRoomMessages(target.id, (messages) => {
-    const isNewIncoming = messages.length > state.lastRenderedMessageCount && state.lastRenderedMessageCount > 0;
     const lastMsg = messages[messages.length - 1];
+    const isNewIncoming = Boolean(state.lastRenderedMessageId && lastMsg && lastMsg.id !== state.lastRenderedMessageId);
 
     state.messages = messages;
     renderAllMessages();
-    state.lastRenderedMessageCount = messages.length;
+    state.lastRenderedMessageId = lastMsg ? lastMsg.id : null;
 
     // Play chime if new incoming message from someone else
     if (isNewIncoming && lastMsg && lastMsg.sender && lastMsg.sender.username !== state.currentUser.username) {
@@ -329,6 +352,11 @@ function switchRoom(roomId) {
       state.unreadWhileScrolled++;
       updateScrollPill();
     }
+  }, (err) => {
+    const message = err.code === 'permission-denied'
+      ? 'Firestore denied access to chat history. Check your Firestore rules or sign in again.'
+      : `Could not load chat history: ${err.message || 'Firebase error'}`;
+    alert(message);
   });
 
   // Subscribe to typing indicators in this room
@@ -419,6 +447,8 @@ function setupAuthFlow() {
         showAuthError('Sign-in cancelled. Only one popup can be active at a time.');
       } else if (err.code === 'auth/unauthorized-domain') {
         showAuthError('This domain is not authorized in Firebase Console -> Auth -> Settings -> Authorized domains.');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        showAuthError('Google sign-in is disabled in Firebase Console -> Authentication -> Sign-in method.');
       } else {
         showAuthError(err.message || 'Failed to sign in with Google.');
       }
@@ -503,6 +533,8 @@ function setupAuthFlow() {
         showAuthError('Password must be at least 6 characters.');
       } else if (err.code === 'auth/invalid-email') {
         showAuthError('Please enter a valid email address.');
+      } else if (err.code === 'auth/operation-not-allowed') {
+        showAuthError('Email/password sign-in is disabled in Firebase Console -> Authentication -> Sign-in method.');
       } else {
         showAuthError(err.message || 'Authentication failed.');
       }
@@ -519,7 +551,7 @@ function setupAuthFlow() {
     });
   });
 
-  el.guestJoinForm.addEventListener('submit', (e) => {
+  el.guestJoinForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     clearAuthError();
 
@@ -527,13 +559,34 @@ function setupAuthFlow() {
     if (!username) return;
 
     const targetRoom = el.guestRoomSelect.value || 'general';
+    localStorage.setItem('pulsechat_username', username);
+    localStorage.setItem('pulsechat_avatar', selectedGuestAvatar);
+    showLoading('Joining as Guest...');
 
-    connectAndJoinRoom({
-      username,
-      avatar: selectedGuestAvatar,
-      email: null,
-      uid: null
-    }, targetRoom);
+    try {
+      const user = await signInAsGuest();
+      connectAndJoinRoom({
+        username,
+        avatar: selectedGuestAvatar,
+        email: null,
+        uid: user.uid,
+        isGuest: true
+      }, targetRoom);
+    } catch (err) {
+      console.error('Guest Sign-In Error:', err);
+      if (err.code === 'auth/operation-not-allowed') {
+        connectAndJoinRoom({
+          username,
+          avatar: selectedGuestAvatar,
+          email: null,
+          uid: null,
+          isGuest: true
+        }, targetRoom);
+      } else {
+        hideLoading();
+        showAuthError(err.message || 'Could not join as a guest. Check your Firebase connection.');
+      }
+    }
   });
 
   // Sign Out Handler
@@ -541,7 +594,18 @@ function setupAuthFlow() {
     if (confirm('Are you sure you want to sign out?')) {
       if (state.currentUser.username) {
         updateUserPresence(state.currentUser, false);
+        setFirestoreTyping(state.currentRoom.id, state.currentUser.username, false);
       }
+      if (state.typingTimeout) clearTimeout(state.typingTimeout);
+      state.isTyping = false;
+      if (state.unsubscribeMessages) state.unsubscribeMessages();
+      if (state.unsubscribeTyping) state.unsubscribeTyping();
+      if (state.unsubscribeRooms) state.unsubscribeRooms();
+      if (state.unsubscribeUsers) state.unsubscribeUsers();
+      state.unsubscribeMessages = null;
+      state.unsubscribeTyping = null;
+      state.unsubscribeRooms = null;
+      state.unsubscribeUsers = null;
       try {
         await logOut();
       } catch (err) {
@@ -555,7 +619,8 @@ function setupAuthFlow() {
         avatar: '⚡',
         status: 'online',
         room: 'general',
-        isAuth: false
+        isAuth: false,
+        isGuest: false
       };
 
       localStorage.removeItem('pulsechat_username');
@@ -564,22 +629,29 @@ function setupAuthFlow() {
       el.joinModal.classList.remove('hidden');
       el.messagesContainer.innerHTML = '';
       el.membersList.innerHTML = '';
+      state.messages = [];
+      state.users = [];
+      state.lastRenderedMessageId = null;
     }
   });
 
   // Observe Firebase Auth State (Persistent Login)
   onAuthUserChanged((firebaseUser) => {
     if (firebaseUser) {
-      const displayName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'User');
-      const avatar = firebaseUser.photoURL || state.currentUser.avatar || '⚡';
+      const displayName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : localStorage.getItem('pulsechat_username')) || 'Guest';
+      const avatar = firebaseUser.photoURL || (firebaseUser.isAnonymous ? localStorage.getItem('pulsechat_avatar') : state.currentUser.avatar) || '⚡';
 
       connectAndJoinRoom({
         username: displayName,
         avatar,
         email: firebaseUser.email,
-        uid: firebaseUser.uid
+        uid: firebaseUser.uid,
+        isGuest: firebaseUser.isAnonymous
       }, state.currentUser.room || 'general');
     }
+  }, (err) => {
+    hideLoading();
+    showAuthError(err.message || 'Could not check Firebase sign-in status.');
   });
 
   // Check incoming redirect sign-in (Safari / mobile)
@@ -596,6 +668,7 @@ function setupAuthFlow() {
     }
   }).catch((err) => {
     console.error('Redirect check error:', err);
+    showAuthError(err.message || 'Could not complete Google sign-in.');
   });
 }
 
@@ -608,7 +681,7 @@ function updateUserProfileUI() {
   el.myStatusDot = document.getElementById('myStatusDot');
   el.myName.textContent = state.currentUser.username;
   if (el.myEmail) {
-    el.myEmail.textContent = state.currentUser.email || (state.currentUser.isAuth ? '' : 'Guest');
+    el.myEmail.textContent = state.currentUser.email || (state.currentUser.isGuest ? 'Guest' : (state.currentUser.isAuth ? '' : 'Guest'));
   }
 }
 
@@ -1003,8 +1076,12 @@ function formatBytes(bytes, decimals = 1) {
 }
 
 function stageFileAttachment(file) {
-  if (file.size > 8 * 1024 * 1024) {
-    alert('File size exceeds the 8MB limit.');
+  // Attachments are stored in the same Firestore message document, which has a 1 MiB limit.
+  // Leave room for base64 encoding and message metadata.
+  const maxFileSize = 700 * 1024;
+  if (file.size > maxFileSize) {
+    alert(`Files must be at most ${formatBytes(maxFileSize)} to fit in a chat message.`);
+    el.fileAttachmentInput.value = '';
     return;
   }
 
@@ -1156,16 +1233,18 @@ el.createRoomForm.addEventListener('submit', async (e) => {
   el.newRoomName.value = '';
   el.newRoomDesc.value = '';
 
+  if (!state.rooms.some(r => r.id === newRoom.id)) {
+    state.rooms.push(newRoom);
+    renderChannelList();
+  }
+
   try {
     await saveCustomRoom(newRoom);
     switchRoom(newRoom.id);
   } catch (err) {
     console.error('Failed to create custom room in Firestore:', err);
-    if (!state.rooms.some(r => r.id === newRoom.id)) {
-      state.rooms.push(newRoom);
-      renderChannelList();
-      switchRoom(newRoom.id);
-    }
+    switchRoom(newRoom.id);
+    alert('This channel is available in this tab, but could not be saved for other users. Check your Firestore access.');
   }
 });
 
@@ -1190,20 +1269,23 @@ el.messageTextInput.addEventListener('input', () => {
 
 function handleTyping() {
   if (!state.currentUser.username) return;
+  const roomId = state.currentRoom.id;
 
   if (!state.isTyping) {
     state.isTyping = true;
-    setFirestoreTyping(state.currentRoom.id, state.currentUser.username, true);
+    setFirestoreTyping(roomId, state.currentUser.username, true);
   }
 
   clearTimeout(state.typingTimeout);
   state.typingTimeout = setTimeout(() => {
     state.isTyping = false;
-    setFirestoreTyping(state.currentRoom.id, state.currentUser.username, false);
+    setFirestoreTyping(roomId, state.currentUser.username, false);
   }, 2500);
 }
 
 async function sendMessage() {
+  if (state.isSending) return;
+
   const text = el.messageTextInput.value.trim();
   const attachment = state.stagedAttachment;
   const codeSnippet = state.stagedCode;
@@ -1211,15 +1293,12 @@ async function sendMessage() {
 
   if (!text && !attachment && !codeSnippet) return;
 
-  el.messageTextInput.value = '';
-  el.messageTextInput.style.height = 'auto';
-  state.replyTo = null;
-  el.replyPreviewBanner.classList.add('hidden');
-  state.stagedAttachment = null;
-  el.fileAttachmentInput.value = '';
-  el.stagedAttachmentBanner.classList.add('hidden');
-  state.stagedCode = null;
-  el.stagedCodeBanner.classList.add('hidden');
+  state.isSending = true;
+  el.messageTextInput.disabled = true;
+  el.attachmentBtn.disabled = true;
+  el.codeSnippetModalBtn.disabled = true;
+  const submitButton = el.chatForm.querySelector('button[type="submit"]');
+  if (submitButton) submitButton.disabled = true;
 
   clearTimeout(state.typingTimeout);
   state.isTyping = false;
@@ -1240,10 +1319,27 @@ async function sendMessage() {
       attachment,
       codeSnippet
     });
+
+    el.messageTextInput.value = '';
+    el.messageTextInput.style.height = 'auto';
+    state.replyTo = null;
+    el.replyPreviewBanner.classList.add('hidden');
+    state.stagedAttachment = null;
+    el.fileAttachmentInput.value = '';
+    el.stagedAttachmentBanner.classList.add('hidden');
+    state.stagedCode = null;
+    el.stagedCodeBanner.classList.add('hidden');
     scrollToBottom(true);
   } catch (err) {
     console.error('Error sending message to Firestore:', err);
     alert('Failed to send message: ' + (err.message || 'Firestore error'));
+  } finally {
+    state.isSending = false;
+    el.messageTextInput.disabled = false;
+    el.attachmentBtn.disabled = false;
+    el.codeSnippetModalBtn.disabled = false;
+    if (submitButton) submitButton.disabled = false;
+    el.messageTextInput.focus();
   }
 }
 

@@ -13,7 +13,9 @@ const io = new Server(server, {
   maxHttpBufferSize: 1e7 // 10MB limit for file/image uploads
 });
 
-const PORT = process.env.PORT || 3000;
+const DEFAULT_PORT = 3000;
+const PORT = Number(process.env.PORT) || DEFAULT_PORT;
+let activePort = PORT;
 
 // Serve static assets
 app.use(express.static(path.join(__dirname, 'public')));
@@ -337,6 +339,22 @@ io.on('connection', (socket) => {
   });
 });
 
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE' && !process.env.PORT && activePort < DEFAULT_PORT + 10) {
+    activePort += 1;
+    console.warn(`Port ${activePort - 1} is already in use. Trying port ${activePort}...`);
+    server.listen(activePort);
+    return;
+  }
+
+  if (error.code === 'EADDRINUSE') {
+    console.error(`Port ${activePort} is already in use. Stop the other server or run with PORT=3001 npm start.`);
+  } else {
+    console.error('Unable to start the chat server:', error.message);
+  }
+  process.exitCode = 1;
+});
+
 server.listen(PORT, () => {
-  console.log(`🚀 Real-Time Chat Server running at http://localhost:${PORT}`);
+  console.log(`🚀 Real-Time Chat Server running at http://localhost:${activePort}`);
 });

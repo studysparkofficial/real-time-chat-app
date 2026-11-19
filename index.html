@@ -340,7 +340,7 @@
             </button>
           </div>
 
-          <textarea id="messageTextInput" rows="1" placeholder="Type a message in #general... (Enter to send, Shift+Enter for new line)" autocomplete="off"></textarea>
+          <textarea id="messageTextInput" rows="1" maxlength="10000" placeholder="Type a message in #general... (Enter to send, Shift+Enter for new line)" autocomplete="off"></textarea>
 
           <button type="submit" id="sendMessageBtn" class="btn btn-send" title="Send message">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -477,7 +477,7 @@
         </div>
         <div class="form-group">
           <label for="codeSnippetContent">Code</label>
-          <textarea id="codeSnippetContent" class="code-textarea" rows="8" placeholder="// Paste or write your code here..." required></textarea>
+          <textarea id="codeSnippetContent" class="code-textarea" rows="8" maxlength="10000" placeholder="// Paste or write your code here..." required></textarea>
         </div>
         <div class="modal-actions">
           <button type="button" id="cancelCodeModalBtn" class="btn btn-secondary">Cancel</button>

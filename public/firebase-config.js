@@ -12,6 +12,7 @@ import {
   GoogleAuthProvider, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
+  signInAnonymously,
   updateProfile,
   signOut, 
   onAuthStateChanged 
@@ -88,14 +89,20 @@ export async function registerWithEmail(email, password, displayName) {
   return result.user;
 }
 
+// Guest chat uses Firebase Anonymous Auth so Firestore rules can require a signed-in user.
+export async function signInAsGuest() {
+  const result = await signInAnonymously(auth);
+  return result.user;
+}
+
 // Sign Out
 export async function logOut() {
   return await signOut(auth);
 }
 
 // Observe Auth state
-export function onAuthUserChanged(callback) {
-  return onAuthStateChanged(auth, callback);
+export function onAuthUserChanged(callback, onError) {
+  return onAuthStateChanged(auth, callback, onError);
 }
 
 // ==================== FIRESTORE REAL-TIME MESSAGING ====================
@@ -120,9 +127,10 @@ export async function sendMessageToFirestore(roomId, messageData) {
 }
 
 // Listen to room messages in real time
-export function listenToRoomMessages(roomId, callback) {
+export function listenToRoomMessages(roomId, callback, onError) {
   const messagesCol = collection(db, 'rooms', roomId, 'messages');
-  const q = query(messagesCol, orderBy('timestamp', 'asc'), limit(150));
+  // Fetch the newest 150, then reverse them for chronological rendering.
+  const q = query(messagesCol, orderBy('timestamp', 'desc'), limit(150));
   return onSnapshot(q, (snapshot) => {
     const messages = [];
     snapshot.forEach((docSnap) => {
@@ -131,9 +139,10 @@ export function listenToRoomMessages(roomId, callback) {
         ...docSnap.data()
       });
     });
-    callback(messages);
+    callback(messages.reverse());
   }, (err) => {
     console.warn('Firestore messages listener error:', err);
+    if (onError) onError(err);
   });
 }
 
