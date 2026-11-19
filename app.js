@@ -115,7 +115,8 @@ const state = {
   unsubscribeRooms: null,
   unsubscribeUsers: null,
   presenceCleanupRegistered: false,
-  lastRenderedMessageId: null
+  lastRenderedMessageId: null,
+  firestoreNoticeShown: false
 };
 
 // --- DOM Elements ---
@@ -297,8 +298,18 @@ function connectAndJoinRoom(userData, targetRoomId = 'general') {
   // Switch to starting room
   switchRoom(targetRoomId);
 
-  // Update presence in Firestore
+  // Update presence in Firestore & broadcast to tabs
   updateUserPresence(state.currentUser, true);
+  broadcastSync({
+    type: 'USER_JOIN',
+    user: {
+      username: state.currentUser.username,
+      avatar: state.currentUser.avatar || '⚡',
+      status: state.currentUser.status || 'online',
+      uid: state.currentUser.uid,
+      room: targetRoomId
+    }
+  });
   if (!state.presenceCleanupRegistered) {
     window.addEventListener('beforeunload', () => {
       updateUserPresence(state.currentUser, false);
@@ -329,34 +340,47 @@ function switchRoom(roomId) {
   renderCurrentRoomHeader();
   renderChannelList();
 
+  // Load cached messages for immediate rendering
+  const localMsgs = getLocalRoomMessages(target.id);
+  state.messages = localMsgs || [];
+  renderAllMessages();
+  scrollToBottom(false);
+
   // Subscribe to real-time messages in this room
   if (state.unsubscribeMessages) state.unsubscribeMessages();
   state.lastRenderedMessageId = null;
 
   state.unsubscribeMessages = listenToRoomMessages(target.id, (messages) => {
-    const lastMsg = messages[messages.length - 1];
-    const isNewIncoming = Boolean(state.lastRenderedMessageId && lastMsg && lastMsg.id !== state.lastRenderedMessageId);
+    if (messages && messages.length > 0) {
+      const cloudMap = new Map();
+      messages.forEach(m => cloudMap.set(m.id, m));
+      state.messages.forEach(m => {
+        if (!cloudMap.has(m.id) && m.id && m.id.startsWith('msg_')) {
+          cloudMap.set(m.id, m);
+        }
+      });
+      const merged = Array.from(cloudMap.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      const lastMsg = merged[merged.length - 1];
+      const isNewIncoming = Boolean(state.lastRenderedMessageId && lastMsg && lastMsg.id !== state.lastRenderedMessageId);
 
-    state.messages = messages;
-    renderAllMessages();
-    state.lastRenderedMessageId = lastMsg ? lastMsg.id : null;
+      state.messages = merged;
+      saveLocalRoomMessages(target.id, merged);
+      renderAllMessages();
+      state.lastRenderedMessageId = lastMsg ? lastMsg.id : null;
 
-    // Play chime if new incoming message from someone else
-    if (isNewIncoming && lastMsg && lastMsg.sender && lastMsg.sender.username !== state.currentUser.username) {
-      soundFx.playMessagePop();
-    }
+      if (isNewIncoming && lastMsg && lastMsg.sender && lastMsg.sender.username !== state.currentUser.username) {
+        soundFx.playMessagePop();
+      }
 
-    if (state.isAtBottom) {
-      scrollToBottom(false);
-    } else {
-      state.unreadWhileScrolled++;
-      updateScrollPill();
+      if (state.isAtBottom) {
+        scrollToBottom(false);
+      } else {
+        state.unreadWhileScrolled++;
+        updateScrollPill();
+      }
     }
   }, (err) => {
-    const message = err.code === 'permission-denied'
-      ? 'Cloud sync is paused: Firestore permissions required. Enable Anonymous Auth in Firebase Console to sync live across devices.'
-      : `Could not load cloud chat history: ${err.message || 'Firebase error'}`;
-    showToast(message, 'warning', 6000);
+    console.warn('Firestore messages listener notice:', err);
   });
 
   // Subscribe to typing indicators in this room
@@ -694,6 +718,101 @@ function setupAuthFlow() {
     console.error('Redirect check error:', err);
     showAuthError(err.message || 'Could not complete Google sign-in.');
   });
+}
+
+// --- Cross-Tab Real-Time Sync & Local Storage Cache ---
+const syncChannel = typeof window !== 'undefined' && window.BroadcastChannel ? new BroadcastChannel('pulsechat_sync') : null;
+
+function broadcastSync(payload) {
+  if (!syncChannel) return;
+  try {
+    syncChannel.postMessage(payload);
+  } catch (e) {
+    console.warn('Broadcast sync error:', e);
+  }
+}
+
+function getLocalRoomMessages(roomId) {
+  try {
+    const raw = localStorage.getItem(`pulsechat_msgs_${roomId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function saveLocalRoomMessages(roomId, messages) {
+  try {
+    const trimmed = (messages || []).slice(-150);
+    localStorage.setItem(`pulsechat_msgs_${roomId}`, JSON.stringify(trimmed));
+  } catch (e) {
+    // Storage full or private mode
+  }
+}
+
+if (syncChannel) {
+  syncChannel.onmessage = (event) => {
+    const data = event.data;
+    if (!data || !data.type) return;
+
+    if (data.type === 'NEW_MESSAGE') {
+      const existing = getLocalRoomMessages(data.roomId);
+      if (!existing.some(m => m.id === data.message.id)) {
+        existing.push(data.message);
+        saveLocalRoomMessages(data.roomId, existing);
+      }
+
+      if (state.currentRoom && data.roomId === state.currentRoom.id) {
+        if (!state.messages.some(m => m.id === data.message.id)) {
+          state.messages.push(data.message);
+          appendMessageToUI(data.message);
+          state.lastRenderedMessageId = data.message.id;
+
+          if (data.message.sender && data.message.sender.username !== state.currentUser.username) {
+            soundFx.playMessagePop();
+          }
+
+          if (state.isAtBottom) {
+            scrollToBottom(true);
+          } else {
+            state.unreadWhileScrolled++;
+            updateScrollPill();
+          }
+        }
+      }
+    } else if (data.type === 'TYPING' && state.currentRoom && data.roomId === state.currentRoom.id) {
+      renderTypingIndicator(data.typers);
+    } else if (data.type === 'REACTION') {
+      const targetRoom = data.roomId;
+      const msgs = getLocalRoomMessages(targetRoom);
+      const targetMsg = msgs.find(m => m.id === data.messageId);
+      if (targetMsg) {
+        targetMsg.reactions = data.reactions;
+        saveLocalRoomMessages(targetRoom, msgs);
+      }
+      if (state.currentRoom && targetRoom === state.currentRoom.id) {
+        const liveMsg = state.messages.find(m => m.id === data.messageId);
+        if (liveMsg) {
+          liveMsg.reactions = data.reactions;
+          updateMessageReactionsUI(data.messageId, data.reactions);
+        }
+      }
+    } else if (data.type === 'USER_JOIN' || data.type === 'USER_LEAVE') {
+      if (data.user && data.user.username !== state.currentUser.username) {
+        if (data.type === 'USER_JOIN') {
+          const idx = state.users.findIndex(u => u.username === data.user.username);
+          if (idx > -1) {
+            state.users[idx] = data.user;
+          } else {
+            state.users.push(data.user);
+          }
+        } else {
+          state.users = state.users.filter(u => u.username !== data.user.username);
+        }
+        renderMembersList();
+      }
+    }
+  };
 }
 
 // --- UI Rendering Helpers ---
@@ -1044,11 +1163,19 @@ async function toggleReaction(messageId, emoji) {
 
   msg.reactions = currentReactions;
   updateMessageReactionsUI(messageId, currentReactions);
+  saveLocalRoomMessages(state.currentRoom.id, state.messages);
+
+  broadcastSync({
+    type: 'REACTION',
+    roomId: state.currentRoom.id,
+    messageId,
+    reactions: currentReactions
+  });
 
   try {
     await updateMessageReactionsInFirestore(state.currentRoom.id, messageId, currentReactions);
   } catch (err) {
-    console.error('Failed to sync reaction to Firestore:', err);
+    console.warn('Failed to sync reaction to Firestore:', err);
   }
 }
 
@@ -1317,19 +1444,27 @@ function handleTyping() {
 
   if (!state.isTyping) {
     state.isTyping = true;
-    setFirestoreTyping(roomId, state.currentUser.username, true);
+    setFirestoreTyping(roomId, state.currentUser.username, true).catch(() => {});
+    broadcastSync({
+      type: 'TYPING',
+      roomId,
+      typers: [state.currentUser.username]
+    });
   }
 
   clearTimeout(state.typingTimeout);
   state.typingTimeout = setTimeout(() => {
     state.isTyping = false;
-    setFirestoreTyping(roomId, state.currentUser.username, false);
+    setFirestoreTyping(roomId, state.currentUser.username, false).catch(() => {});
+    broadcastSync({
+      type: 'TYPING',
+      roomId,
+      typers: []
+    });
   }, 2500);
 }
 
 async function sendMessage() {
-  if (state.isSending) return;
-
   const text = el.messageTextInput.value.trim();
   const attachment = state.stagedAttachment;
   const codeSnippet = state.stagedCode;
@@ -1337,20 +1472,35 @@ async function sendMessage() {
 
   if (!text && !attachment && !codeSnippet) return;
 
-  state.isSending = true;
-  el.messageTextInput.disabled = true;
-  el.attachmentBtn.disabled = true;
-  el.codeSnippetModalBtn.disabled = true;
-  const submitButton = el.chatForm.querySelector('button[type="submit"]');
-  if (submitButton) submitButton.disabled = true;
+  // 1. Clear chat box and staged attachments IMMEDIATELY (0ms)
+  el.messageTextInput.value = '';
+  el.messageTextInput.style.height = 'auto';
+  state.replyTo = null;
+  el.replyPreviewBanner.classList.add('hidden');
+  state.stagedAttachment = null;
+  el.fileAttachmentInput.value = '';
+  el.stagedAttachmentBanner.classList.add('hidden');
+  state.stagedCode = null;
+  el.stagedCodeBanner.classList.add('hidden');
+  el.messageTextInput.focus();
 
+  // Reset typing
   clearTimeout(state.typingTimeout);
   state.isTyping = false;
   if (state.currentUser.username) {
-    setFirestoreTyping(state.currentRoom.id, state.currentUser.username, false);
+    setFirestoreTyping(state.currentRoom.id, state.currentUser.username, false).catch(() => {});
+    broadcastSync({
+      type: 'TYPING',
+      roomId: state.currentRoom.id,
+      typers: []
+    });
   }
 
+  // 2. Build message object
+  const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
   const messagePayload = {
+    id: msgId,
+    roomId: state.currentRoom.id,
     text,
     sender: {
       username: state.currentUser.username || 'Anonymous',
@@ -1360,62 +1510,33 @@ async function sendMessage() {
     },
     replyTo,
     attachment,
-    codeSnippet
+    codeSnippet,
+    reactions: {},
+    timestamp: Date.now()
   };
 
-  try {
-    await sendMessageToFirestore(state.currentRoom.id, messagePayload);
+  // 3. Immediately render locally
+  state.messages.push(messagePayload);
+  appendMessageToUI(messagePayload);
+  state.lastRenderedMessageId = msgId;
+  saveLocalRoomMessages(state.currentRoom.id, state.messages);
+  scrollToBottom(true);
 
-    el.messageTextInput.value = '';
-    el.messageTextInput.style.height = 'auto';
-    state.replyTo = null;
-    el.replyPreviewBanner.classList.add('hidden');
-    state.stagedAttachment = null;
-    el.fileAttachmentInput.value = '';
-    el.stagedAttachmentBanner.classList.add('hidden');
-    state.stagedCode = null;
-    el.stagedCodeBanner.classList.add('hidden');
-    scrollToBottom(true);
-  } catch (err) {
-    console.error('Error sending message to Firestore:', err);
-    
-    // Add locally so the message is visible in this session
-    const localMsg = {
-      id: 'local_' + Date.now(),
-      ...messagePayload,
-      reactions: {},
-      timestamp: Date.now()
-    };
-    if (!state.messages.some(m => m.id === localMsg.id)) {
-      state.messages.push(localMsg);
-      appendMessageToUI(localMsg);
-      scrollToBottom(true);
+  // 4. Instantly broadcast to all other open tabs/windows
+  broadcastSync({
+    type: 'NEW_MESSAGE',
+    roomId: state.currentRoom.id,
+    message: messagePayload
+  });
+
+  // 5. Asynchronously persist to Cloud Firestore in the background
+  sendMessageToFirestore(state.currentRoom.id, messagePayload).catch((err) => {
+    console.warn('Firestore cloud sync notice:', err);
+    if (!state.firestoreNoticeShown) {
+      state.firestoreNoticeShown = true;
+      showToast('Real-time cloud database not active: Create your Firestore Database in Firebase Console (Build > Firestore Database > Create Database) to sync across different computers/phones.', 'warning', 8000);
     }
-
-    el.messageTextInput.value = '';
-    el.messageTextInput.style.height = 'auto';
-    state.replyTo = null;
-    el.replyPreviewBanner.classList.add('hidden');
-    state.stagedAttachment = null;
-    el.fileAttachmentInput.value = '';
-    el.stagedAttachmentBanner.classList.add('hidden');
-    state.stagedCode = null;
-    el.stagedCodeBanner.classList.add('hidden');
-
-    const isPermission = err.code === 'permission-denied' || (err.message && err.message.includes('permission'));
-    if (isPermission) {
-      showToast('Message posted locally. To sync live with other users, enable Anonymous Auth in Firebase Console.', 'warning', 6000);
-    } else {
-      showToast('Could not sync message to cloud: ' + (err.message || 'Network error'), 'warning');
-    }
-  } finally {
-    state.isSending = false;
-    el.messageTextInput.disabled = false;
-    el.attachmentBtn.disabled = false;
-    el.codeSnippetModalBtn.disabled = false;
-    if (submitButton) submitButton.disabled = false;
-    el.messageTextInput.focus();
-  }
+  });
 }
 
 // --- Scroll Management ---

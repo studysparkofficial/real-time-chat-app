@@ -107,10 +107,10 @@ export function onAuthUserChanged(callback, onError) {
 
 // ==================== FIRESTORE REAL-TIME MESSAGING ====================
 
-// Send a chat message to a room
+// Send a chat message to a room with timeout protection
 export async function sendMessageToFirestore(roomId, messageData) {
   const messagesCol = collection(db, 'rooms', roomId, 'messages');
-  return await addDoc(messagesCol, {
+  const addPromise = addDoc(messagesCol, {
     text: messageData.text || '',
     sender: {
       username: messageData.sender.username,
@@ -121,9 +121,15 @@ export async function sendMessageToFirestore(roomId, messageData) {
     replyTo: messageData.replyTo || null,
     attachment: messageData.attachment || null,
     codeSnippet: messageData.codeSnippet || null,
-    reactions: {},
-    timestamp: Date.now()
+    reactions: messageData.reactions || {},
+    timestamp: messageData.timestamp || Date.now()
   });
+
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Cloud sync timeout: verify Firestore Database is created in Firebase Console')), 5000)
+  );
+
+  return await Promise.race([addPromise, timeoutPromise]);
 }
 
 // Listen to room messages in real time
