@@ -34,6 +34,10 @@ Create a Firestore database and configure security rules for the sign-in methods
 
 Attachments are embedded in Firestore message documents and are limited to 700 KB.
 
+## Deploy to AWS Amplify
+
+The root `amplify.yml` tells Amplify to publish the static files from `public/`; there is no frontend compile step. Push that file to the connected branch to trigger a new deployment. Amplify Hosting serves the client files; Firebase still handles chat data and authentication. Add the Amplify domain (for example, `main.<id>.amplifyapp.com`) to Firebase Authentication's authorized domains so sign-in works on the deployed site.
+
 ## Try multi-user chat
 
 Open the printed local URL in two browser tabs, join the same channel with different display names, and send messages. Messages and channel data are shared through Firestore.
