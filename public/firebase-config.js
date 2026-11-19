@@ -156,10 +156,14 @@ export async function toggleFirestoreReaction(roomId, messageId, emoji, username
 }
 
 export async function updateMessageReactionsInFirestore(roomId, messageId, newReactions) {
-  const msgDocRef = doc(db, 'rooms', roomId, 'messages', messageId);
-  return await updateDoc(msgDocRef, {
-    reactions: newReactions
-  });
+  try {
+    const msgDocRef = doc(db, 'rooms', roomId, 'messages', messageId);
+    return await updateDoc(msgDocRef, {
+      reactions: newReactions
+    });
+  } catch (err) {
+    console.warn('Reactions sync error:', err);
+  }
 }
 
 // Typing indicators
@@ -167,17 +171,17 @@ export async function setFirestoreTyping(roomId, username, isTyping) {
   if (!username) return;
   const safeUserKey = encodeURIComponent(username).replace(/\./g, '_');
   const typingDocRef = doc(db, 'rooms', roomId, 'typing', safeUserKey);
-  if (isTyping) {
-    return await setDoc(typingDocRef, {
-      username,
-      updatedAt: Date.now()
-    });
-  } else {
-    try {
+  try {
+    if (isTyping) {
+      return await setDoc(typingDocRef, {
+        username,
+        updatedAt: Date.now()
+      });
+    } else {
       return await deleteDoc(typingDocRef);
-    } catch (e) {
-      // Ignore if already deleted
     }
+  } catch (e) {
+    // Gracefully ignore typing sync errors
   }
 }
 
@@ -204,20 +208,22 @@ export async function updateUserPresence(userData, isOnline = true) {
   if (!userData || !userData.username) return;
   const userKey = userData.uid || encodeURIComponent(userData.username).replace(/\./g, '_');
   const userRef = doc(db, 'online_users', userKey);
-  if (isOnline) {
-    return await setDoc(userRef, {
-      username: userData.username,
-      avatar: userData.avatar || '⚡',
-      email: userData.email || null,
-      uid: userData.uid || null,
-      status: userData.status || 'online',
-      room: userData.room || 'general',
-      lastSeen: Date.now()
-    }, { merge: true });
-  } else {
-    try {
+  try {
+    if (isOnline) {
+      return await setDoc(userRef, {
+        username: userData.username,
+        avatar: userData.avatar || '⚡',
+        email: userData.email || null,
+        uid: userData.uid || null,
+        status: userData.status || 'online',
+        room: userData.room || 'general',
+        lastSeen: Date.now()
+      }, { merge: true });
+    } else {
       return await deleteDoc(userRef);
-    } catch (e) {}
+    }
+  } catch (e) {
+    console.warn('Presence sync error:', e);
   }
 }
 

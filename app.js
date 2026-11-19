@@ -260,8 +260,8 @@ function connectAndJoinRoom(userData, targetRoomId = 'general') {
   state.currentUser.username = userData.username;
   state.currentUser.avatar = userData.avatar || '⚡';
   state.currentUser.email = userData.email || null;
-  state.currentUser.uid = userData.uid || null;
-  state.currentUser.isAuth = Boolean(userData.uid);
+  state.currentUser.uid = userData.uid || ('guest_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8));
+  state.currentUser.isAuth = Boolean(userData.uid && !userData.isGuest);
   state.currentUser.isGuest = Boolean(userData.isGuest);
 
   localStorage.setItem('pulsechat_username', userData.username);
@@ -354,9 +354,9 @@ function switchRoom(roomId) {
     }
   }, (err) => {
     const message = err.code === 'permission-denied'
-      ? 'Firestore denied access to chat history. Check your Firestore rules or sign in again.'
-      : `Could not load chat history: ${err.message || 'Firebase error'}`;
-    alert(message);
+      ? 'Cloud sync is paused: Firestore permissions required. Enable Anonymous Auth in Firebase Console to sync live across devices.'
+      : `Could not load cloud chat history: ${err.message || 'Firebase error'}`;
+    showToast(message, 'warning', 6000);
   });
 
   // Subscribe to typing indicators in this room
@@ -404,6 +404,33 @@ function showLoading(text = 'Authenticating...') {
 
 function hideLoading() {
   el.authLoadingOverlay.classList.add('hidden');
+}
+
+// --- In-App Toast Notification ---
+function showToast(message, type = 'warning', duration = 5000) {
+  let container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  const icon = type === 'error' ? '⚠️' : (type === 'success' ? '✅' : 'ℹ️');
+  toast.innerHTML = `<span>${icon}</span><span style="flex:1;">${escapeHtml(message)}</span>`;
+  container.appendChild(toast);
+
+  setTimeout(() => {
+    toast.classList.add('toast-fade-out');
+    setTimeout(() => {
+      toast.remove();
+      if (container.children.length === 0) {
+        container.remove();
+      }
+    }, 300);
+  }, duration);
 }
 
 // --- Firebase Authentication Setup ---
@@ -573,19 +600,16 @@ function setupAuthFlow() {
         isGuest: true
       }, targetRoom);
     } catch (err) {
-      console.error('Guest Sign-In Error:', err);
-      if (err.code === 'auth/operation-not-allowed') {
-        connectAndJoinRoom({
-          username,
-          avatar: selectedGuestAvatar,
-          email: null,
-          uid: null,
-          isGuest: true
-        }, targetRoom);
-      } else {
-        hideLoading();
-        showAuthError(err.message || 'Could not join as a guest. Check your Firebase connection.');
-      }
+      console.warn('Firebase Anonymous Auth unavailable, continuing as guest:', err);
+      // Graceful fallback: If Anonymous auth is not enabled in Firebase Console (e.g. auth/admin-restricted-operation)
+      const fallbackUid = 'guest_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+      connectAndJoinRoom({
+        username,
+        avatar: selectedGuestAvatar,
+        email: null,
+        uid: fallbackUid,
+        isGuest: true
+      }, targetRoom);
     }
   });
 
@@ -728,9 +752,28 @@ function renderCurrentRoomHeader() {
 }
 
 function renderMembersList() {
+  const currentRoomId = state.currentRoom ? state.currentRoom.id : 'general';
+
   // Filter for members in current room or all active
-  const roomMembers = state.users.filter(u => !u.room || u.room === state.currentRoom.id);
-  const displayList = roomMembers.length > 0 ? roomMembers : state.users;
+  const roomMembers = state.users.filter(u => !u.room || u.room === currentRoomId);
+  const displayList = [...(roomMembers.length > 0 ? roomMembers : state.users)];
+
+  // Ensure current user is always visible in the active members list
+  if (state.currentUser && state.currentUser.username) {
+    const alreadyPresent = displayList.some(u => 
+      (state.currentUser.uid && u.uid === state.currentUser.uid) ||
+      u.username === state.currentUser.username
+    );
+    if (!alreadyPresent) {
+      displayList.unshift({
+        username: state.currentUser.username,
+        avatar: state.currentUser.avatar || '⚡',
+        status: state.currentUser.status || 'online',
+        uid: state.currentUser.uid,
+        room: currentRoomId
+      });
+    }
+  }
 
   el.memberCountBadge.textContent = displayList.length;
   el.memberCountText.textContent = displayList.length;
@@ -1080,7 +1123,7 @@ function stageFileAttachment(file) {
   // Leave room for base64 encoding and message metadata.
   const maxFileSize = 700 * 1024;
   if (file.size > maxFileSize) {
-    alert(`Files must be at most ${formatBytes(maxFileSize)} to fit in a chat message.`);
+    showToast(`Files must be at most ${formatBytes(maxFileSize)} to fit in a chat message.`, 'warning');
     el.fileAttachmentInput.value = '';
     return;
   }
@@ -1171,6 +1214,7 @@ function populateEmojiPicker(category = 'smileys') {
     btn.addEventListener('click', () => {
       el.messageTextInput.value += emoji;
       el.messageTextInput.focus();
+      el.messageTextInput.dispatchEvent(new Event('input'));
     });
     el.emojiList.appendChild(btn);
   });
@@ -1244,7 +1288,7 @@ el.createRoomForm.addEventListener('submit', async (e) => {
   } catch (err) {
     console.error('Failed to create custom room in Firestore:', err);
     switchRoom(newRoom.id);
-    alert('This channel is available in this tab, but could not be saved for other users. Check your Firestore access.');
+    showToast('This channel is available locally in this tab, but could not be saved to the cloud. Check your Firestore access.', 'warning');
   }
 });
 
@@ -1306,19 +1350,21 @@ async function sendMessage() {
     setFirestoreTyping(state.currentRoom.id, state.currentUser.username, false);
   }
 
+  const messagePayload = {
+    text,
+    sender: {
+      username: state.currentUser.username || 'Anonymous',
+      avatar: state.currentUser.avatar || '⚡',
+      email: state.currentUser.email || null,
+      uid: state.currentUser.uid || null
+    },
+    replyTo,
+    attachment,
+    codeSnippet
+  };
+
   try {
-    await sendMessageToFirestore(state.currentRoom.id, {
-      text,
-      sender: {
-        username: state.currentUser.username || 'Anonymous',
-        avatar: state.currentUser.avatar || '⚡',
-        email: state.currentUser.email || null,
-        uid: state.currentUser.uid || null
-      },
-      replyTo,
-      attachment,
-      codeSnippet
-    });
+    await sendMessageToFirestore(state.currentRoom.id, messagePayload);
 
     el.messageTextInput.value = '';
     el.messageTextInput.style.height = 'auto';
@@ -1332,7 +1378,36 @@ async function sendMessage() {
     scrollToBottom(true);
   } catch (err) {
     console.error('Error sending message to Firestore:', err);
-    alert('Failed to send message: ' + (err.message || 'Firestore error'));
+    
+    // Add locally so the message is visible in this session
+    const localMsg = {
+      id: 'local_' + Date.now(),
+      ...messagePayload,
+      reactions: {},
+      timestamp: Date.now()
+    };
+    if (!state.messages.some(m => m.id === localMsg.id)) {
+      state.messages.push(localMsg);
+      appendMessageToUI(localMsg);
+      scrollToBottom(true);
+    }
+
+    el.messageTextInput.value = '';
+    el.messageTextInput.style.height = 'auto';
+    state.replyTo = null;
+    el.replyPreviewBanner.classList.add('hidden');
+    state.stagedAttachment = null;
+    el.fileAttachmentInput.value = '';
+    el.stagedAttachmentBanner.classList.add('hidden');
+    state.stagedCode = null;
+    el.stagedCodeBanner.classList.add('hidden');
+
+    const isPermission = err.code === 'permission-denied' || (err.message && err.message.includes('permission'));
+    if (isPermission) {
+      showToast('Message posted locally. To sync live with other users, enable Anonymous Auth in Firebase Console.', 'warning', 6000);
+    } else {
+      showToast('Could not sync message to cloud: ' + (err.message || 'Network error'), 'warning');
+    }
   } finally {
     state.isSending = false;
     el.messageTextInput.disabled = false;
