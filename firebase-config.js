@@ -107,10 +107,15 @@ export function onAuthUserChanged(callback, onError) {
 
 // ==================== FIRESTORE REAL-TIME MESSAGING ====================
 
-// Send a chat message to a room with timeout protection
+// Send a chat message to a room with timeout protection and consistent doc ID
 export async function sendMessageToFirestore(roomId, messageData) {
-  const messagesCol = collection(db, 'rooms', roomId, 'messages');
-  const addPromise = addDoc(messagesCol, {
+  // Use caller-provided ID to guarantee Firestore document ID matches local optimistic message ID
+  const docId = messageData.id || doc(collection(db, 'rooms', roomId, 'messages')).id;
+  const msgDocRef = doc(db, 'rooms', roomId, 'messages', docId);
+
+  const payload = {
+    id: docId,
+    clientMsgId: docId,
     text: messageData.text || '',
     sender: {
       username: messageData.sender.username,
@@ -123,13 +128,15 @@ export async function sendMessageToFirestore(roomId, messageData) {
     codeSnippet: messageData.codeSnippet || null,
     reactions: messageData.reactions || {},
     timestamp: messageData.timestamp || Date.now()
-  });
+  };
 
+  const savePromise = setDoc(msgDocRef, payload);
   const timeoutPromise = new Promise((_, reject) =>
     setTimeout(() => reject(new Error('Cloud sync timeout: verify Firestore Database is created in Firebase Console')), 5000)
   );
 
-  return await Promise.race([addPromise, timeoutPromise]);
+  await Promise.race([savePromise, timeoutPromise]);
+  return payload;
 }
 
 // Listen to room messages in real time
@@ -140,9 +147,11 @@ export function listenToRoomMessages(roomId, callback, onError) {
   return onSnapshot(q, (snapshot) => {
     const messages = [];
     snapshot.forEach((docSnap) => {
+      const data = docSnap.data();
       messages.push({
+        ...data,
         id: docSnap.id,
-        ...docSnap.data()
+        clientMsgId: data.clientMsgId || docSnap.id
       });
     });
     callback(messages.reverse());

@@ -342,7 +342,7 @@ function switchRoom(roomId) {
 
   // Load cached messages for immediate rendering
   const localMsgs = getLocalRoomMessages(target.id);
-  state.messages = localMsgs || [];
+  state.messages = deduplicateMessagesList(localMsgs || []);
   renderAllMessages();
   scrollToBottom(false);
 
@@ -351,15 +351,9 @@ function switchRoom(roomId) {
   state.lastRenderedMessageId = null;
 
   state.unsubscribeMessages = listenToRoomMessages(target.id, (messages) => {
-    if (messages && messages.length > 0) {
-      const cloudMap = new Map();
-      messages.forEach(m => cloudMap.set(m.id, m));
-      state.messages.forEach(m => {
-        if (!cloudMap.has(m.id) && m.id && m.id.startsWith('msg_')) {
-          cloudMap.set(m.id, m);
-        }
-      });
-      const merged = Array.from(cloudMap.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    if (messages) {
+      // Deduplicate: merge incoming Firestore messages with existing local messages
+      const merged = deduplicateMessagesList([...messages, ...state.messages]);
       const lastMsg = merged[merged.length - 1];
       const isNewIncoming = Boolean(state.lastRenderedMessageId && lastMsg && lastMsg.id !== state.lastRenderedMessageId);
 
@@ -732,10 +726,66 @@ function broadcastSync(payload) {
   }
 }
 
+function isDuplicateMessage(a, b) {
+  if (!a || !b) return false;
+  // 1. Direct ID or clientMsgId matches
+  if (a.id && b.id && a.id === b.id) return true;
+  if (a.clientMsgId && b.id && a.clientMsgId === b.id) return true;
+  if (b.clientMsgId && a.id && b.clientMsgId === a.id) return true;
+  if (a.clientMsgId && b.clientMsgId && a.clientMsgId === b.clientMsgId) return true;
+
+  // 2. Semantic content match: same sender + same text / attachment / code snippet within 8 seconds
+  const authorA = a.sender?.username || '';
+  const authorB = b.sender?.username || '';
+  if (authorA && authorA === authorB) {
+    const textA = (a.text || '').trim();
+    const textB = (b.text || '').trim();
+    const attachA = a.attachment ? (a.attachment.name || (a.attachment.data ? a.attachment.data.substring(0, 50) : '')) : '';
+    const attachB = b.attachment ? (b.attachment.name || (b.attachment.data ? b.attachment.data.substring(0, 50) : '')) : '';
+    const codeA = a.codeSnippet ? (a.codeSnippet.code || '') : '';
+    const codeB = b.codeSnippet ? (b.codeSnippet.code || '') : '';
+
+    const sameContent = (textA && textA === textB) || (attachA && attachA === attachB) || (codeA && codeA === codeB);
+    if (sameContent) {
+      const timeDiff = Math.abs((a.timestamp || 0) - (b.timestamp || 0));
+      if (timeDiff <= 8000) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function deduplicateMessagesList(messages) {
+  if (!Array.isArray(messages)) return [];
+  const clean = [];
+
+  for (const msg of messages) {
+    if (!msg) continue;
+    const existingIndex = clean.findIndex(existing => isDuplicateMessage(existing, msg));
+    if (existingIndex === -1) {
+      clean.push(msg);
+    } else {
+      const existing = clean[existingIndex];
+      // If the incoming message has reactions and existing doesn't, copy reactions
+      if (msg.reactions && Object.keys(msg.reactions).length > 0 && (!existing.reactions || Object.keys(existing.reactions).length === 0)) {
+        existing.reactions = msg.reactions;
+      }
+      // If existing is an optimistic temp ID (e.g. starts with 'msg_') but incoming is a cloud ID, update id
+      if (existing.id && existing.id.startsWith('msg_') && msg.id && !msg.id.startsWith('msg_')) {
+        existing.id = msg.id;
+      }
+    }
+  }
+
+  return clean.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+}
+
 function getLocalRoomMessages(roomId) {
   try {
     const raw = localStorage.getItem(`pulsechat_msgs_${roomId}`);
-    return raw ? JSON.parse(raw) : [];
+    const parsed = raw ? JSON.parse(raw) : [];
+    return deduplicateMessagesList(parsed);
   } catch (e) {
     return [];
   }
@@ -743,7 +793,8 @@ function getLocalRoomMessages(roomId) {
 
 function saveLocalRoomMessages(roomId, messages) {
   try {
-    const trimmed = (messages || []).slice(-150);
+    const clean = deduplicateMessagesList(messages || []);
+    const trimmed = clean.slice(-150);
     localStorage.setItem(`pulsechat_msgs_${roomId}`, JSON.stringify(trimmed));
   } catch (e) {
     // Storage full or private mode
@@ -757,14 +808,13 @@ if (syncChannel) {
 
     if (data.type === 'NEW_MESSAGE') {
       const existing = getLocalRoomMessages(data.roomId);
-      if (!existing.some(m => m.id === data.message.id)) {
-        existing.push(data.message);
-        saveLocalRoomMessages(data.roomId, existing);
-      }
+      const updatedLocal = deduplicateMessagesList([...existing, data.message]);
+      saveLocalRoomMessages(data.roomId, updatedLocal);
 
       if (state.currentRoom && data.roomId === state.currentRoom.id) {
-        if (!state.messages.some(m => m.id === data.message.id)) {
-          state.messages.push(data.message);
+        const isDup = state.messages.some(m => isDuplicateMessage(m, data.message));
+        if (!isDup) {
+          state.messages = deduplicateMessagesList([...state.messages, data.message]);
           appendMessageToUI(data.message);
           state.lastRenderedMessageId = data.message.id;
 
@@ -926,6 +976,8 @@ function renderMembersList() {
 
 function renderAllMessages() {
   el.messagesContainer.innerHTML = '';
+  state.messages = deduplicateMessagesList(state.messages);
+
   state.messages.forEach((msg) => {
     appendMessageToUI(msg);
   });
@@ -961,6 +1013,40 @@ function formatMarkdown(text) {
 }
 
 function appendMessageToUI(msg) {
+  if (!msg) return;
+
+  // Prevent duplicate insertion in DOM by ID
+  if (msg.id && document.getElementById(`msg-el-${msg.id}`)) {
+    return;
+  }
+
+  const author = msg.sender?.username || 'user';
+  const text = (msg.text || '').trim();
+  const timestamp = msg.timestamp || 0;
+  const attachKey = msg.attachment ? (msg.attachment.name || '') : '';
+  const codeKey = msg.codeSnippet ? (msg.codeSnippet.code || '').substring(0, 50) : '';
+
+  // Semantic check against existing DOM rows
+  if (text || attachKey || codeKey) {
+    const existingRows = el.messagesContainer.querySelectorAll('.message-row');
+    for (const row of existingRows) {
+      if (row.dataset.author === author) {
+        const sameContent = (text && row.dataset.text === text) ||
+                            (attachKey && row.dataset.attach === attachKey) ||
+                            (codeKey && row.dataset.code === codeKey);
+        if (sameContent) {
+          const rowTime = Number(row.dataset.timestamp) || 0;
+          if (Math.abs(timestamp - rowTime) <= 8000) {
+            if (msg.id && !msg.id.startsWith('msg_')) {
+              row.id = `msg-el-${msg.id}`;
+            }
+            return;
+          }
+        }
+      }
+    }
+  }
+
   const isSelf = msg.sender && (
     (state.currentUser.uid && msg.sender.uid && msg.sender.uid === state.currentUser.uid) ||
     (state.currentUser.username && msg.sender.username === state.currentUser.username)
@@ -969,6 +1055,11 @@ function appendMessageToUI(msg) {
   const row = document.createElement('div');
   row.className = `message-row ${isSelf ? 'is-outgoing' : 'is-incoming'}`;
   row.id = `msg-el-${msg.id}`;
+  row.dataset.author = author;
+  row.dataset.timestamp = String(timestamp);
+  if (text) row.dataset.text = text;
+  if (attachKey) row.dataset.attach = attachKey;
+  if (codeKey) row.dataset.code = codeKey;
 
   let replySnippetHtml = '';
   if (msg.replyTo) {
@@ -1427,6 +1518,7 @@ el.chatForm.addEventListener('submit', (e) => {
 
 el.messageTextInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.isComposing) return;
     e.preventDefault();
     sendMessage();
   }
@@ -1464,13 +1556,20 @@ function handleTyping() {
   }, 2500);
 }
 
+let lastSendTimestamp = 0;
+
 async function sendMessage() {
+  const now = Date.now();
+  if (now - lastSendTimestamp < 350) return;
+
   const text = el.messageTextInput.value.trim();
   const attachment = state.stagedAttachment;
   const codeSnippet = state.stagedCode;
   const replyTo = state.replyTo;
 
   if (!text && !attachment && !codeSnippet) return;
+
+  lastSendTimestamp = now;
 
   // 1. Clear chat box and staged attachments IMMEDIATELY (0ms)
   el.messageTextInput.value = '';
@@ -1500,6 +1599,7 @@ async function sendMessage() {
   const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
   const messagePayload = {
     id: msgId,
+    clientMsgId: msgId,
     roomId: state.currentRoom.id,
     text,
     sender: {
@@ -1517,6 +1617,7 @@ async function sendMessage() {
 
   // 3. Immediately render locally
   state.messages.push(messagePayload);
+  state.messages = deduplicateMessagesList(state.messages);
   appendMessageToUI(messagePayload);
   state.lastRenderedMessageId = msgId;
   saveLocalRoomMessages(state.currentRoom.id, state.messages);
