@@ -11,6 +11,7 @@ import {
   signInWithEmail, 
   registerWithEmail, 
   signInAsGuest,
+  updateFirebaseUserProfile,
   auth,
   logOut, 
   onAuthUserChanged,
@@ -163,8 +164,10 @@ const el = {
 
   appLayout: document.getElementById('appLayout'),
   sidebarLeft: document.getElementById('sidebarLeft'),
-  sidebarRight: document.getElementById('sidebarRight'),
   sidebarBackdrop: document.getElementById('sidebarBackdrop'),
+  closeSidebarBtn: document.getElementById('closeSidebarBtn'),
+  openAccountFromSidebarBtn: document.getElementById('openAccountFromSidebarBtn'),
+  userProfileBar: document.getElementById('userProfileBar'),
 
   channelList: document.getElementById('channelList'),
   openCreateRoomBtn: document.getElementById('openCreateRoomBtn'),
@@ -178,7 +181,11 @@ const el = {
 
   currentRoomIcon: document.getElementById('currentRoomIcon'),
   currentRoomTitle: document.getElementById('currentRoomTitle'),
+  currentRoomSubtitle: document.getElementById('currentRoomSubtitle'),
   currentRoomDesc: document.getElementById('currentRoomDesc'),
+  channelInfoTriggerBtn: document.getElementById('channelInfoTriggerBtn'),
+  memberCountOnline: document.getElementById('memberCountOnline'),
+
   detailRoomIcon: document.getElementById('detailRoomIcon'),
   detailRoomName: document.getElementById('detailRoomName'),
   detailRoomDesc: document.getElementById('detailRoomDesc'),
@@ -190,6 +197,47 @@ const el = {
   myStatusDot: document.getElementById('myStatusDot'),
   userStatusSelect: document.getElementById('userStatusSelect'),
   signOutBtn: document.getElementById('signOutBtn'),
+
+  headerProfileBtn: document.getElementById('headerProfileBtn'),
+  headerProfileAvatar: document.getElementById('headerProfileAvatar'),
+  headerProfileStatusDot: document.getElementById('headerProfileStatusDot'),
+  chatMoreMenuBtn: document.getElementById('chatMoreMenuBtn'),
+  chatOptionsMenu: document.getElementById('chatOptionsMenu'),
+  menuItemChannels: document.getElementById('menuItemChannels'),
+  menuItemAccount: document.getElementById('menuItemAccount'),
+  menuItemChannelInfo: document.getElementById('menuItemChannelInfo'),
+  menuItemTheme: document.getElementById('menuItemTheme'),
+  menuItemSound: document.getElementById('menuItemSound'),
+  menuItemSignOut: document.getElementById('menuItemSignOut'),
+
+  channelInfoModal: document.getElementById('channelInfoModal'),
+  closeChannelInfoModalBtn: document.getElementById('closeChannelInfoModalBtn'),
+  closeChannelInfoDoneBtn: document.getElementById('closeChannelInfoDoneBtn'),
+
+  accountModal: document.getElementById('accountModal'),
+  closeAccountModalBtn: document.getElementById('closeAccountModalBtn'),
+  cancelAccountBtn: document.getElementById('cancelAccountBtn'),
+  accountForm: document.getElementById('accountForm'),
+  accountAvatarPreview: document.getElementById('accountAvatarPreview'),
+  accountAvatarGrid: document.getElementById('accountAvatarGrid'),
+  accountCustomAvatarInput: document.getElementById('accountCustomAvatarInput'),
+  accountHeroName: document.getElementById('accountHeroName'),
+  accountHeroAuthType: document.getElementById('accountHeroAuthType'),
+  accountDisplayNameInput: document.getElementById('accountDisplayNameInput'),
+  accountBioInput: document.getElementById('accountBioInput'),
+  accountStatusSelect: document.getElementById('accountStatusSelect'),
+  accountAuthType: document.getElementById('accountAuthType'),
+  accountEmail: document.getElementById('accountEmail'),
+  accountUid: document.getElementById('accountUid'),
+  copyUidBtn: document.getElementById('copyUidBtn'),
+  accountToggleThemeBtn: document.getElementById('accountToggleThemeBtn'),
+  accountThemeIcon: document.getElementById('accountThemeIcon'),
+  accountThemeLabel: document.getElementById('accountThemeLabel'),
+  accountToggleSoundBtn: document.getElementById('accountToggleSoundBtn'),
+  accountSoundIcon: document.getElementById('accountSoundIcon'),
+  accountSoundLabel: document.getElementById('accountSoundLabel'),
+  saveAccountBtn: document.getElementById('saveAccountBtn'),
+  accountSignOutBtn: document.getElementById('accountSignOutBtn'),
 
   messagesViewport: document.getElementById('messagesViewport'),
   messagesContainer: document.getElementById('messagesContainer'),
@@ -250,8 +298,6 @@ const el = {
   memberCountText: document.getElementById('memberCountText'),
 
   toggleMobileSidebarBtn: document.getElementById('toggleMobileSidebarBtn'),
-  toggleMembersBtn: document.getElementById('toggleMembersBtn'),
-  closeRightSidebarBtn: document.getElementById('closeRightSidebarBtn'),
   themeToggleBtn: document.getElementById('themeToggleBtn'),
   soundToggleBtn: document.getElementById('soundToggleBtn'),
   soundOnIcon: document.getElementById('soundOnIcon'),
@@ -967,14 +1013,27 @@ if (syncChannel) {
 
 // --- UI Rendering Helpers ---
 function updateUserProfileUI() {
-  el.myAvatarWrap.innerHTML = `
-    ${renderAvatarHtml(state.currentUser.avatar, '⚡', state.currentUser.username)}
-    <span class="status-indicator ${state.currentUser.status || 'online'}" id="myStatusDot"></span>
-  `;
-  el.myStatusDot = document.getElementById('myStatusDot');
-  el.myName.textContent = state.currentUser.username;
+  if (el.myAvatarWrap) {
+    el.myAvatarWrap.innerHTML = `
+      ${renderAvatarHtml(state.currentUser.avatar, '⚡', state.currentUser.username)}
+      <span class="status-indicator ${state.currentUser.status || 'online'}" id="myStatusDot"></span>
+    `;
+    el.myStatusDot = document.getElementById('myStatusDot');
+  }
+  if (el.myName) el.myName.textContent = state.currentUser.username;
   if (el.myEmail) {
     el.myEmail.textContent = state.currentUser.email || (state.currentUser.isGuest ? 'Guest' : (state.currentUser.isAuth ? '' : 'Guest'));
+  }
+
+  // Header profile button avatar & indicator
+  if (el.headerProfileAvatar) {
+    el.headerProfileAvatar.innerHTML = renderAvatarHtml(state.currentUser.avatar, '⚡', state.currentUser.username);
+  }
+  if (el.headerProfileStatusDot) {
+    el.headerProfileStatusDot.className = `status-indicator ${state.currentUser.status || 'online'}`;
+  }
+  if (el.userStatusSelect) {
+    el.userStatusSelect.value = state.currentUser.status || 'online';
   }
 }
 
@@ -1005,24 +1064,24 @@ function renderChannelList() {
 function renderCurrentRoomHeader() {
   if (!state.currentRoom) return;
 
-  el.currentRoomIcon.textContent = state.currentRoom.icon || '💬';
-  el.currentRoomTitle.textContent = `#${state.currentRoom.name}`;
-  el.currentRoomDesc.textContent = state.currentRoom.description || '';
+  if (el.currentRoomIcon) el.currentRoomIcon.textContent = state.currentRoom.icon || '💬';
+  if (el.currentRoomTitle) el.currentRoomTitle.textContent = `#${state.currentRoom.name}`;
+  if (el.currentRoomDesc) el.currentRoomDesc.textContent = state.currentRoom.description || '';
 
-  el.detailRoomIcon.textContent = state.currentRoom.icon || '💬';
-  el.detailRoomName.textContent = `#${state.currentRoom.name}`;
-  el.detailRoomDesc.textContent = state.currentRoom.description || '';
+  if (el.detailRoomIcon) el.detailRoomIcon.textContent = state.currentRoom.icon || '💬';
+  if (el.detailRoomName) el.detailRoomName.textContent = `#${state.currentRoom.name}`;
+  if (el.detailRoomDesc) el.detailRoomDesc.textContent = state.currentRoom.description || '';
 
-  el.welcomeIcon.textContent = state.currentRoom.icon || '💬';
-  el.welcomeTitle.textContent = `Welcome to #${state.currentRoom.name}!`;
-  el.welcomeText.textContent = state.currentRoom.description || `This is the start of #${state.currentRoom.name}.`;
+  if (el.welcomeIcon) el.welcomeIcon.textContent = state.currentRoom.icon || '💬';
+  if (el.welcomeTitle) el.welcomeTitle.textContent = `Welcome to #${state.currentRoom.name}!`;
+  if (el.welcomeText) el.welcomeText.textContent = state.currentRoom.description || `This is the start of #${state.currentRoom.name}.`;
 
   updateMessageInputPlaceholder();
 }
 
 function updateMessageInputPlaceholder() {
   if (!state.currentRoom) return;
-  el.messageTextInput.placeholder = window.matchMedia('(max-width: 700px)').matches
+  el.messageTextInput.placeholder = window.matchMedia('(max-width: 880px)').matches
     ? `Message #${state.currentRoom.name}…`
     : `Type a message in #${state.currentRoom.name}... (Enter to send, Shift+Enter for new line)`;
 }
@@ -1051,35 +1110,38 @@ function renderMembersList() {
     }
   }
 
-  el.memberCountBadge.textContent = displayList.length;
-  el.memberCountText.textContent = displayList.length;
-  el.membersList.innerHTML = '';
+  if (el.memberCountBadge) el.memberCountBadge.textContent = displayList.length;
+  if (el.memberCountText) el.memberCountText.textContent = displayList.length;
+  if (el.memberCountOnline) el.memberCountOnline.textContent = displayList.length;
+  if (el.membersList) {
+    el.membersList.innerHTML = '';
 
-  displayList.forEach((user) => {
-    const isMe = (state.currentUser.uid && user.uid === state.currentUser.uid) || 
-      (state.currentUser.username && user.username === state.currentUser.username && !['guest', 'anonymous'].includes(user.username.toLowerCase()));
-    const row = document.createElement('div');
-    row.className = 'member-row';
-    row.innerHTML = `
-      <div class="member-avatar-wrap">
-        ${renderAvatarHtml(user.avatar, '👤', user.username)}
-        <span class="status-indicator ${user.status || 'online'}"></span>
-      </div>
-      <div class="member-meta">
-        <span class="member-name">${escapeHtml(user.username)}${isMe ? ' (You)' : ''}</span>
-        <span class="member-status">${user.status || 'online'}</span>
-      </div>
-    `;
+    displayList.forEach((user) => {
+      const isMe = (state.currentUser.uid && user.uid === state.currentUser.uid) || 
+        (state.currentUser.username && user.username === state.currentUser.username && !['guest', 'anonymous'].includes(user.username.toLowerCase()));
+      const row = document.createElement('div');
+      row.className = 'member-row';
+      row.innerHTML = `
+        <div class="member-avatar-wrap">
+          ${renderAvatarHtml(user.avatar, '👤', user.username)}
+          <span class="status-indicator ${user.status || 'online'}"></span>
+        </div>
+        <div class="member-meta">
+          <span class="member-name">${escapeHtml(user.username)}${isMe ? ' (You)' : ''}</span>
+          <span class="member-status">${user.status || 'online'}</span>
+        </div>
+      `;
 
-    row.addEventListener('click', () => {
-      if (!isMe) {
-        el.messageTextInput.value += ` @${user.username} `;
-        el.messageTextInput.focus();
-      }
+      row.addEventListener('click', () => {
+        if (!isMe) {
+          el.messageTextInput.value += ` @${user.username} `;
+          el.messageTextInput.focus();
+        }
+      });
+
+      el.membersList.appendChild(row);
     });
-
-    el.membersList.appendChild(row);
-  });
+  }
 }
 
 function renderAllMessages() {
@@ -2074,74 +2136,422 @@ el.imageLightboxModal.addEventListener('click', (e) => {
   }
 });
 
-// --- Mobile Navigation ---
+// --- Mobile Navigation & Drawer ---
 function syncMobileDrawerState() {
-  const isMobileWidth = window.matchMedia('(max-width: 900px)').matches;
-  const leftOpen = el.sidebarLeft.classList.contains('open') && window.matchMedia('(max-width: 700px)').matches;
-  const rightOpen = el.sidebarRight.classList.contains('open') && isMobileWidth;
-  const rightVisible = isMobileWidth ? rightOpen : !el.sidebarRight.classList.contains('hidden-sidebar');
-  const hasOpenDrawer = leftOpen || rightOpen;
+  const leftOpen = el.sidebarLeft ? el.sidebarLeft.classList.contains('open') : false;
+  if (el.appLayout) {
+    el.appLayout.classList.toggle('has-open-sidebar', leftOpen);
+  }
+  if (el.sidebarBackdrop) {
+    el.sidebarBackdrop.setAttribute('aria-hidden', String(!leftOpen));
+  }
+  if (el.toggleMobileSidebarBtn) {
+    el.toggleMobileSidebarBtn.setAttribute('aria-expanded', String(leftOpen));
+    el.toggleMobileSidebarBtn.setAttribute('aria-label', leftOpen ? 'Close channels' : 'Open channels');
+  }
+}
 
-  el.appLayout.classList.toggle('has-open-sidebar', hasOpenDrawer);
-  el.sidebarBackdrop.setAttribute('aria-hidden', String(!hasOpenDrawer));
-  el.toggleMobileSidebarBtn.setAttribute('aria-expanded', String(leftOpen));
-  el.toggleMembersBtn.setAttribute('aria-expanded', String(rightVisible));
-  el.toggleMobileSidebarBtn.setAttribute('aria-label', leftOpen ? 'Close channels' : 'Open channels');
-  el.toggleMembersBtn.setAttribute('aria-label', isMobileWidth
-    ? (rightOpen ? 'Close channel members' : 'Open channel members')
-    : (rightVisible ? 'Hide channel members' : 'Show channel members'));
+function openMobileDrawer() {
+  if (el.sidebarLeft) {
+    el.sidebarLeft.classList.add('open');
+    syncMobileDrawerState();
+  }
 }
 
 function closeMobileDrawers() {
-  el.sidebarLeft.classList.remove('open');
-  el.sidebarRight.classList.remove('open');
+  if (el.sidebarLeft) {
+    el.sidebarLeft.classList.remove('open');
+  }
+  closeOptionsMenu();
   syncMobileDrawerState();
 }
 
-el.toggleMobileSidebarBtn.addEventListener('click', () => {
-  const shouldOpen = !el.sidebarLeft.classList.contains('open');
-  el.sidebarRight.classList.remove('open');
-  el.sidebarLeft.classList.toggle('open', shouldOpen);
-  syncMobileDrawerState();
-});
-
-el.toggleMembersBtn.addEventListener('click', () => {
-  if (!window.matchMedia('(max-width: 900px)').matches) {
-    el.sidebarRight.classList.toggle('hidden-sidebar');
+if (el.toggleMobileSidebarBtn) {
+  el.toggleMobileSidebarBtn.addEventListener('click', () => {
+    const shouldOpen = !el.sidebarLeft.classList.contains('open');
+    el.sidebarLeft.classList.toggle('open', shouldOpen);
     syncMobileDrawerState();
-    return;
-  }
+  });
+}
 
-  const shouldOpen = !el.sidebarRight.classList.contains('open');
-  el.sidebarLeft.classList.remove('open');
-  el.sidebarRight.classList.remove('hidden-sidebar');
-  el.sidebarRight.classList.toggle('open', shouldOpen);
-  syncMobileDrawerState();
-  el.toggleMembersBtn.setAttribute('aria-label', shouldOpen ? 'Close channel members' : 'Open channel members');
-});
+if (el.closeSidebarBtn) {
+  el.closeSidebarBtn.addEventListener('click', closeMobileDrawers);
+}
 
-el.closeRightSidebarBtn.addEventListener('click', () => {
-  closeMobileDrawers();
-});
+if (el.sidebarBackdrop) {
+  el.sidebarBackdrop.addEventListener('click', closeMobileDrawers);
+}
 
-el.sidebarBackdrop.addEventListener('click', closeMobileDrawers);
 window.addEventListener('resize', () => {
-  if (!window.matchMedia('(max-width: 900px)').matches) {
+  if (!window.matchMedia('(max-width: 880px)').matches) {
     closeMobileDrawers();
-  } else {
-    el.sidebarRight.classList.remove('hidden-sidebar');
-    syncMobileDrawerState();
   }
   updateMessageInputPlaceholder();
 });
 
+// --- 3-Dots Header Options Menu ---
+function closeOptionsMenu() {
+  if (el.chatOptionsMenu) {
+    el.chatOptionsMenu.classList.add('hidden');
+  }
+}
+
+if (el.chatMoreMenuBtn) {
+  el.chatMoreMenuBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (el.chatOptionsMenu) {
+      el.chatOptionsMenu.classList.toggle('hidden');
+    }
+  });
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.more-menu-wrapper')) {
+    closeOptionsMenu();
+  }
+});
+
+if (el.menuItemChannels) {
+  el.menuItemChannels.addEventListener('click', () => {
+    closeOptionsMenu();
+    openMobileDrawer();
+  });
+}
+
+if (el.menuItemAccount) {
+  el.menuItemAccount.addEventListener('click', () => {
+    closeOptionsMenu();
+    openAccountModal();
+  });
+}
+
+if (el.menuItemChannelInfo) {
+  el.menuItemChannelInfo.addEventListener('click', () => {
+    closeOptionsMenu();
+    openChannelInfoModal();
+  });
+}
+
+if (el.menuItemTheme) {
+  el.menuItemTheme.addEventListener('click', () => {
+    closeOptionsMenu();
+    if (el.themeToggleBtn) el.themeToggleBtn.click();
+  });
+}
+
+if (el.menuItemSound) {
+  el.menuItemSound.addEventListener('click', () => {
+    closeOptionsMenu();
+    if (el.soundToggleBtn) el.soundToggleBtn.click();
+  });
+}
+
+if (el.menuItemSignOut) {
+  el.menuItemSignOut.addEventListener('click', () => {
+    closeOptionsMenu();
+    if (el.signOutBtn) el.signOutBtn.click();
+  });
+}
+
+// --- Channel Info & Members Modal ---
+function openChannelInfoModal() {
+  renderMembersList();
+  if (state.currentRoom) {
+    if (el.detailRoomIcon) el.detailRoomIcon.textContent = state.currentRoom.icon || '💬';
+    if (el.detailRoomName) el.detailRoomName.textContent = `#${state.currentRoom.name}`;
+    if (el.detailRoomDesc) el.detailRoomDesc.textContent = state.currentRoom.description || `Welcome to #${state.currentRoom.name}`;
+  }
+  if (el.channelInfoModal) {
+    el.channelInfoModal.classList.remove('hidden');
+  }
+}
+
+function closeChannelInfoModal() {
+  if (el.channelInfoModal) {
+    el.channelInfoModal.classList.add('hidden');
+  }
+}
+
+if (el.channelInfoTriggerBtn) {
+  el.channelInfoTriggerBtn.addEventListener('click', openChannelInfoModal);
+}
+
+if (el.closeChannelInfoModalBtn) {
+  el.closeChannelInfoModalBtn.addEventListener('click', closeChannelInfoModal);
+}
+
+if (el.closeChannelInfoDoneBtn) {
+  el.closeChannelInfoDoneBtn.addEventListener('click', closeChannelInfoModal);
+}
+
+if (el.channelInfoModal) {
+  el.channelInfoModal.addEventListener('click', (e) => {
+    if (e.target === el.channelInfoModal) {
+      closeChannelInfoModal();
+    }
+  });
+}
+
+// --- User Account & Profile Settings Modal ---
+let currentEditingAvatar = '⚡';
+
+function openAccountModal() {
+  currentEditingAvatar = state.currentUser.avatar || '⚡';
+  
+  if (el.accountAvatarPreview) {
+    el.accountAvatarPreview.innerHTML = renderAvatarHtml(currentEditingAvatar, '⚡', state.currentUser.username);
+  }
+  if (el.accountHeroName) {
+    el.accountHeroName.textContent = state.currentUser.username || 'User';
+  }
+
+  const authTypeLabel = state.currentUser.isGuest
+    ? 'Guest Account'
+    : (state.currentUser.email
+      ? (state.currentUser.email.endsWith('@gmail.com') ? 'Google Account' : 'Email Account')
+      : 'Registered Account');
+
+  if (el.accountHeroAuthType) el.accountHeroAuthType.textContent = authTypeLabel;
+  if (el.accountAuthType) el.accountAuthType.textContent = authTypeLabel;
+
+  if (el.accountDisplayNameInput) el.accountDisplayNameInput.value = state.currentUser.username || '';
+  if (el.accountBioInput) el.accountBioInput.value = state.currentUser.bio || localStorage.getItem('pulsechat_bio') || '';
+  if (el.accountStatusSelect) el.accountStatusSelect.value = state.currentUser.status || 'online';
+  if (el.accountEmail) el.accountEmail.textContent = state.currentUser.email || (state.currentUser.isGuest ? 'Guest (No email linked)' : 'None');
+  if (el.accountUid) el.accountUid.textContent = state.currentUser.uid || '—';
+  if (el.accountCustomAvatarInput) el.accountCustomAvatarInput.value = '';
+
+  highlightAccountAvatar(currentEditingAvatar);
+  updateAccountPrefButtonsUI();
+
+  if (el.accountModal) {
+    el.accountModal.classList.remove('hidden');
+    setTimeout(() => {
+      if (el.accountDisplayNameInput) el.accountDisplayNameInput.focus();
+    }, 100);
+  }
+}
+
+function closeAccountModal() {
+  if (el.accountModal) {
+    el.accountModal.classList.add('hidden');
+  }
+}
+
+function highlightAccountAvatar(avatar) {
+  if (!el.accountAvatarGrid) return;
+  const opts = el.accountAvatarGrid.querySelectorAll('.avatar-opt');
+  opts.forEach(opt => {
+    opt.classList.toggle('selected', opt.dataset.avatar === avatar);
+  });
+}
+
+function updateAccountPrefButtonsUI() {
+  const isDark = document.body.classList.contains('theme-dark');
+  if (el.accountThemeIcon) el.accountThemeIcon.textContent = isDark ? '🌙' : '☀️';
+  if (el.accountThemeLabel) el.accountThemeLabel.textContent = isDark ? 'Theme: Dark' : 'Theme: Light';
+
+  if (el.accountSoundIcon) el.accountSoundIcon.textContent = soundFx.enabled ? '🔔' : '🔕';
+  if (el.accountSoundLabel) el.accountSoundLabel.textContent = soundFx.enabled ? 'Sound: On' : 'Sound: Muted';
+}
+
+// Avatar Grid Selection in Account Modal
+if (el.accountAvatarGrid) {
+  el.accountAvatarGrid.addEventListener('click', (e) => {
+    const btn = e.target.closest('.avatar-opt');
+    if (!btn) return;
+    currentEditingAvatar = btn.dataset.avatar || '⚡';
+    if (el.accountAvatarPreview) {
+      el.accountAvatarPreview.innerHTML = renderAvatarHtml(currentEditingAvatar, '⚡', el.accountDisplayNameInput?.value || '');
+    }
+    highlightAccountAvatar(currentEditingAvatar);
+    if (el.accountCustomAvatarInput) el.accountCustomAvatarInput.value = '';
+  });
+}
+
+// Custom Avatar Input in Account Modal
+if (el.accountCustomAvatarInput) {
+  el.accountCustomAvatarInput.addEventListener('input', (e) => {
+    const val = e.target.value.trim();
+    if (val) {
+      currentEditingAvatar = val;
+      if (el.accountAvatarPreview) {
+        el.accountAvatarPreview.innerHTML = renderAvatarHtml(currentEditingAvatar, '⚡', el.accountDisplayNameInput?.value || '');
+      }
+      highlightAccountAvatar('');
+    }
+  });
+}
+
+// Live update name in hero as user types
+if (el.accountDisplayNameInput) {
+  el.accountDisplayNameInput.addEventListener('input', (e) => {
+    if (el.accountHeroName) {
+      el.accountHeroName.textContent = e.target.value.trim() || 'User';
+    }
+  });
+}
+
+// Copy UID
+if (el.copyUidBtn) {
+  el.copyUidBtn.addEventListener('click', () => {
+    if (!state.currentUser.uid) return;
+    navigator.clipboard.writeText(state.currentUser.uid).then(() => {
+      const orig = el.copyUidBtn.textContent;
+      el.copyUidBtn.textContent = 'Copied!';
+      showToast('User ID copied to clipboard!', 'success');
+      setTimeout(() => {
+        el.copyUidBtn.textContent = orig;
+      }, 2000);
+    }).catch(() => {
+      showToast('Could not copy UID', 'warning');
+    });
+  });
+}
+
+// Toggle Theme from Account Modal
+if (el.accountToggleThemeBtn) {
+  el.accountToggleThemeBtn.addEventListener('click', () => {
+    if (el.themeToggleBtn) el.themeToggleBtn.click();
+    updateAccountPrefButtonsUI();
+  });
+}
+
+// Toggle Sound from Account Modal
+if (el.accountToggleSoundBtn) {
+  el.accountToggleSoundBtn.addEventListener('click', () => {
+    if (el.soundToggleBtn) el.soundToggleBtn.click();
+    updateAccountPrefButtonsUI();
+  });
+}
+
+// Form Submit: Save Account Settings
+if (el.accountForm) {
+  el.accountForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const newName = (el.accountDisplayNameInput ? el.accountDisplayNameInput.value : '').trim();
+    if (!newName) {
+      showToast('Please enter a display name.', 'warning');
+      return;
+    }
+
+    const newAvatar = currentEditingAvatar || state.currentUser.avatar || '⚡';
+    const newBio = (el.accountBioInput ? el.accountBioInput.value : '').trim();
+    const newStatus = (el.accountStatusSelect ? el.accountStatusSelect.value : 'online') || 'online';
+
+    if (el.saveAccountBtn) {
+      el.saveAccountBtn.disabled = true;
+      el.saveAccountBtn.textContent = 'Saving…';
+    }
+
+    try {
+      state.currentUser.username = newName;
+      state.currentUser.avatar = newAvatar;
+      state.currentUser.bio = newBio;
+      state.currentUser.status = newStatus;
+
+      localStorage.setItem('pulsechat_username', newName);
+      localStorage.setItem('pulsechat_avatar', newAvatar);
+      localStorage.setItem('pulsechat_bio', newBio);
+      localStorage.setItem('pulsechat_status', newStatus);
+
+      // Update Firebase Auth user profile if logged in
+      try {
+        await updateFirebaseUserProfile(newName, newAvatar);
+      } catch (authErr) {
+        console.warn('Firebase Auth profile update notice:', authErr);
+      }
+
+      // Update Presence in Firestore
+      try {
+        await updateUserPresence(state.currentUser, true);
+      } catch (presErr) {
+        console.warn('Presence update notice:', presErr);
+      }
+
+      // Broadcast update across tabs
+      broadcastSync({
+        type: 'USER_JOIN',
+        user: {
+          username: state.currentUser.username,
+          avatar: state.currentUser.avatar,
+          status: state.currentUser.status,
+          uid: state.currentUser.uid,
+          room: state.currentRoom ? state.currentRoom.id : 'general'
+        }
+      });
+
+      updateUserProfileUI();
+      renderMembersList();
+      closeAccountModal();
+      showToast('Profile updated successfully! ✨', 'success');
+    } catch (err) {
+      console.error('Save account error:', err);
+      showToast('Error saving profile: ' + (err.message || 'Unknown error'), 'error');
+    } finally {
+      if (el.saveAccountBtn) {
+        el.saveAccountBtn.disabled = false;
+        el.saveAccountBtn.textContent = 'Save Changes';
+      }
+    }
+  });
+}
+
+// Trigger Account Modal from buttons
+if (el.headerProfileBtn) {
+  el.headerProfileBtn.addEventListener('click', openAccountModal);
+}
+
+if (el.userProfileBar) {
+  el.userProfileBar.addEventListener('click', (e) => {
+    // If clicking status select dropdown or sign out button, do not open account modal
+    if (e.target.closest('#userStatusSelect') || e.target.closest('#signOutBtn')) {
+      return;
+    }
+    openAccountModal();
+  });
+}
+
+if (el.openAccountFromSidebarBtn) {
+  el.openAccountFromSidebarBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openAccountModal();
+  });
+}
+
+if (el.closeAccountModalBtn) {
+  el.closeAccountModalBtn.addEventListener('click', closeAccountModal);
+}
+
+if (el.cancelAccountBtn) {
+  el.cancelAccountBtn.addEventListener('click', closeAccountModal);
+}
+
+if (el.accountSignOutBtn) {
+  el.accountSignOutBtn.addEventListener('click', () => {
+    closeAccountModal();
+    if (el.signOutBtn) el.signOutBtn.click();
+  });
+}
+
+if (el.accountModal) {
+  el.accountModal.addEventListener('click', (e) => {
+    if (e.target === el.accountModal) {
+      closeAccountModal();
+    }
+  });
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    el.imageLightboxModal.classList.add('hidden');
+    if (el.imageLightboxModal) el.imageLightboxModal.classList.add('hidden');
     closeCreateRoomModal();
     closeCodeModal();
-    el.floatingReactionPicker.classList.add('hidden');
-    el.emojiPickerDropdown.classList.add('hidden');
+    closeChannelInfoModal();
+    closeAccountModal();
+    closeOptionsMenu();
+    if (el.floatingReactionPicker) el.floatingReactionPicker.classList.add('hidden');
+    if (el.emojiPickerDropdown) el.emojiPickerDropdown.classList.add('hidden');
     closeMobileDrawers();
   }
 });

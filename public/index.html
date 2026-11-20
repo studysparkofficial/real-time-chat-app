@@ -180,10 +180,18 @@
           <span class="brand-badge">⚡</span>
           <span class="brand-name">PulseChat</span>
         </div>
-        <button id="themeToggleBtn" class="icon-btn" title="Toggle Theme">
-          <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-          <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-        </button>
+        <div class="sidebar-header-actions">
+          <button id="openAccountFromSidebarBtn" class="icon-btn" title="Account Settings" aria-label="Account Settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          </button>
+          <button id="themeToggleBtn" class="icon-btn" title="Toggle Theme">
+            <svg class="sun-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            <svg class="moon-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <button id="closeSidebarBtn" class="icon-btn mobile-only" title="Close Sidebar" aria-label="Close sidebar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="6"/></svg>
+          </button>
+        </div>
       </div>
 
       <!-- Channels Section -->
@@ -200,15 +208,18 @@
       </div>
 
       <!-- User Profile Box -->
-      <div class="user-profile-bar">
+      <div class="user-profile-bar" id="userProfileBar" title="Click to open Account Settings">
         <div class="user-avatar-wrap" id="myAvatarWrap">
           <span class="user-avatar" id="myAvatar">⚡</span>
           <span class="status-indicator online" id="myStatusDot"></span>
         </div>
         <div class="user-meta">
-          <span class="user-name" id="myName">User</span>
+          <div class="user-meta-name-row">
+            <span class="user-name" id="myName">User</span>
+            <span class="edit-profile-badge" title="Edit Profile">✏️</span>
+          </div>
           <span class="user-email" id="myEmail"></span>
-          <div class="status-selector-wrap">
+          <div class="status-selector-wrap" id="userStatusSelectWrap">
             <select id="userStatusSelect" class="status-select">
               <option value="online">🟢 Online</option>
               <option value="away">🟡 Away</option>
@@ -231,14 +242,24 @@
       <!-- Chat Header -->
       <header class="chat-header">
         <div class="chat-header-left">
-          <button id="toggleMobileSidebarBtn" class="mobile-toggle-btn icon-btn" title="Toggle Channels" aria-label="Open channels" aria-controls="sidebarLeft" aria-expanded="false">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h18M3 6h18M3 18h18"/></svg>
+          <!-- 3-Dots Button to open Channels Drawer -->
+          <button id="toggleMobileSidebarBtn" class="mobile-toggle-btn icon-btn" title="Open Channels &amp; Menu" aria-label="Open channels" aria-controls="sidebarLeft" aria-expanded="false">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="5" r="2.2"/>
+              <circle cx="12" cy="12" r="2.2"/>
+              <circle cx="12" cy="19" r="2.2"/>
+            </svg>
           </button>
-          <div class="current-channel-info">
+          
+          <!-- Channel Info Header (Clicking opens Channel Details & Members) -->
+          <div class="current-channel-info" id="channelInfoTriggerBtn" role="button" tabindex="0" title="Tap for Channel Details &amp; Members">
             <span class="channel-icon" id="currentRoomIcon">💬</span>
             <div class="channel-titles">
-              <h1 class="channel-title" id="currentRoomTitle">#general</h1>
-              <span class="channel-desc" id="currentRoomDesc">Welcome to general channel</span>
+              <div class="channel-title-row">
+                <h1 class="channel-title" id="currentRoomTitle">#general</h1>
+                <span class="channel-arrow-hint">›</span>
+              </div>
+              <span class="channel-subtitle" id="currentRoomSubtitle"><span id="memberCountOnline">1</span> online • tap for info</span>
             </div>
           </div>
         </div>
@@ -247,7 +268,7 @@
           <!-- Search in room -->
           <div class="search-box">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-            <input type="text" id="messageSearchInput" placeholder="Search messages...">
+            <input type="text" id="messageSearchInput" placeholder="Search...">
           </div>
 
           <!-- Sound Mute/Unmute -->
@@ -256,11 +277,50 @@
             <svg id="soundOffIcon" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
           </button>
 
-          <!-- Toggle Right Sidebar (Members) -->
-          <button id="toggleMembersBtn" class="icon-btn" title="Toggle Members Sidebar" aria-label="Open channel members" aria-controls="sidebarRight" aria-expanded="false">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            <span class="badge" id="memberCountBadge">0</span>
+          <!-- User Profile / Account Button -->
+          <button id="headerProfileBtn" class="header-profile-btn" title="My Account &amp; Profile" aria-label="My Account">
+            <span class="header-profile-avatar" id="headerProfileAvatar">⚡</span>
+            <span class="status-indicator online" id="headerProfileStatusDot"></span>
           </button>
+
+          <!-- 3-Dots More Options Menu Button -->
+          <div class="more-menu-wrapper">
+            <button id="chatMoreMenuBtn" class="icon-btn" title="More Options" aria-label="More options" aria-haspopup="true">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="5" r="2.2"/>
+                <circle cx="12" cy="12" r="2.2"/>
+                <circle cx="12" cy="19" r="2.2"/>
+              </svg>
+            </button>
+            <div id="chatOptionsMenu" class="chat-options-menu glass-panel hidden">
+              <button type="button" class="menu-item" id="menuItemChannels">
+                <span class="menu-item-icon">📂</span>
+                <span>Channels &amp; Rooms</span>
+              </button>
+              <button type="button" class="menu-item" id="menuItemAccount">
+                <span class="menu-item-icon">👤</span>
+                <span>My Account &amp; Profile</span>
+              </button>
+              <button type="button" class="menu-item" id="menuItemChannelInfo">
+                <span class="menu-item-icon">👥</span>
+                <span>Channel Details &amp; Members</span>
+              </button>
+              <div class="menu-divider"></div>
+              <button type="button" class="menu-item" id="menuItemTheme">
+                <span class="menu-item-icon">🌓</span>
+                <span>Toggle Theme</span>
+              </button>
+              <button type="button" class="menu-item" id="menuItemSound">
+                <span class="menu-item-icon">🔔</span>
+                <span>Notification Sounds</span>
+              </button>
+              <div class="menu-divider"></div>
+              <button type="button" class="menu-item text-danger" id="menuItemSignOut">
+                <span class="menu-item-icon">🚪</span>
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -369,13 +429,20 @@
       </div>
     </main>
 
-    <!-- RIGHT SIDEBAR: ROOM DETAILS & ACTIVE MEMBERS -->
-    <aside class="sidebar-right" id="sidebarRight">
-      <div class="sidebar-right-header">
-        <h3>Channel Details</h3>
-        <button id="closeRightSidebarBtn" class="icon-btn mobile-only" title="Close">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="6"/></svg>
-        </button>
+    <!-- Mobile Drawer Backdrop Overlay -->
+    <div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+
+  </div>
+
+  <!-- ==================== CHANNEL INFO & MEMBERS MODAL ==================== -->
+  <div id="channelInfoModal" class="modal-backdrop hidden">
+    <div class="modal-card channel-info-modal-card glass-panel">
+      <div class="modal-header">
+        <div class="modal-header-title">
+          <span class="modal-header-icon">💬</span>
+          <h3>Channel Details</h3>
+        </div>
+        <button id="closeChannelInfoModalBtn" class="close-btn">&times;</button>
       </div>
 
       <div class="channel-card-detail">
@@ -416,11 +483,139 @@
           </div>
         </div>
       </div>
-    </aside>
 
-    <!-- Mobile Drawer Backdrop Overlay -->
-    <div id="sidebarBackdrop" class="sidebar-backdrop" aria-hidden="true"></div>
+      <div class="modal-actions" style="margin-top: 16px;">
+        <button type="button" id="closeChannelInfoDoneBtn" class="btn btn-secondary btn-block">Close</button>
+      </div>
+    </div>
+  </div>
 
+  <!-- ==================== USER ACCOUNT / PROFILE MODAL ==================== -->
+  <div id="accountModal" class="modal-backdrop hidden">
+    <div class="modal-card account-modal-card glass-panel">
+      <div class="modal-header">
+        <div class="modal-header-title">
+          <span class="modal-header-icon">⚙️</span>
+          <h3>User Account &amp; Settings</h3>
+        </div>
+        <button id="closeAccountModalBtn" class="close-btn">&times;</button>
+      </div>
+
+      <form id="accountForm">
+        <!-- Profile Banner Showcase -->
+        <div class="account-profile-hero">
+          <div class="account-avatar-showcase">
+            <div class="account-avatar-large" id="accountAvatarPreview">⚡</div>
+            <div class="account-avatar-edit-badge" title="Avatar preview">✨</div>
+          </div>
+          <div class="account-hero-info">
+            <h4 id="accountHeroName">User</h4>
+            <span class="account-hero-badge" id="accountHeroAuthType">Guest Account</span>
+          </div>
+        </div>
+
+        <!-- Display Name -->
+        <div class="form-group">
+          <label for="accountDisplayNameInput">Display Name</label>
+          <div class="input-with-icon">
+            <span class="field-icon">@</span>
+            <input type="text" id="accountDisplayNameInput" placeholder="Enter your display name" maxlength="25" required autocomplete="name">
+          </div>
+          <small class="helper-text">Appears on all messages and in active member lists.</small>
+        </div>
+
+        <!-- Avatar Selection Grid -->
+        <div class="form-group">
+          <label>Choose Avatar Icon</label>
+          <div class="avatar-grid account-avatar-grid" id="accountAvatarGrid">
+            <button type="button" class="avatar-opt" data-avatar="⚡">⚡</button>
+            <button type="button" class="avatar-opt" data-avatar="🚀">🚀</button>
+            <button type="button" class="avatar-opt" data-avatar="🐱">🐱</button>
+            <button type="button" class="avatar-opt" data-avatar="🦊">🦊</button>
+            <button type="button" class="avatar-opt" data-avatar="🤖">🤖</button>
+            <button type="button" class="avatar-opt" data-avatar="🧙‍♂️">🧙‍♂️</button>
+            <button type="button" class="avatar-opt" data-avatar="👾">👾</button>
+            <button type="button" class="avatar-opt" data-avatar="🦄">🦄</button>
+            <button type="button" class="avatar-opt" data-avatar="🦁">🦁</button>
+            <button type="button" class="avatar-opt" data-avatar="🐼">🐼</button>
+            <button type="button" class="avatar-opt" data-avatar="🐯">🐯</button>
+            <button type="button" class="avatar-opt" data-avatar="🐶">🐶</button>
+            <button type="button" class="avatar-opt" data-avatar="👑">👑</button>
+            <button type="button" class="avatar-opt" data-avatar="🔥">🔥</button>
+            <button type="button" class="avatar-opt" data-avatar="💫">💫</button>
+            <button type="button" class="avatar-opt" data-avatar="🌟">🌟</button>
+            <button type="button" class="avatar-opt" data-avatar="🕶️">🕶️</button>
+            <button type="button" class="avatar-opt" data-avatar="🎧">🎧</button>
+            <button type="button" class="avatar-opt" data-avatar="💻">💻</button>
+            <button type="button" class="avatar-opt" data-avatar="☕">☕</button>
+            <button type="button" class="avatar-opt" data-avatar="🎮">🎮</button>
+            <button type="button" class="avatar-opt" data-avatar="🎯">🎯</button>
+            <button type="button" class="avatar-opt" data-avatar="🍕">🍕</button>
+            <button type="button" class="avatar-opt" data-avatar="🏆">🏆</button>
+          </div>
+          <div class="custom-avatar-row">
+            <input type="text" id="accountCustomAvatarInput" placeholder="Or type any emoji / image URL..." maxlength="250">
+          </div>
+        </div>
+
+        <!-- About / Status Bio -->
+        <div class="form-group">
+          <label for="accountBioInput">About / Status Bio</label>
+          <div class="input-with-icon">
+            <span class="field-icon">💬</span>
+            <input type="text" id="accountBioInput" placeholder="e.g. Hey! I'm using PulseChat, available to connect..." maxlength="80">
+          </div>
+        </div>
+
+        <!-- Presence Status -->
+        <div class="form-group">
+          <label for="accountStatusSelect">Presence Status</label>
+          <select id="accountStatusSelect" class="form-select">
+            <option value="online">🟢 Online</option>
+            <option value="away">🟡 Away</option>
+            <option value="busy">🔴 Busy (Do Not Disturb)</option>
+          </select>
+        </div>
+
+        <!-- Account Info Box -->
+        <div class="account-info-box">
+          <div class="account-info-row">
+            <span class="info-label">Account Type:</span>
+            <span class="info-val" id="accountAuthType">Guest Account</span>
+          </div>
+          <div class="account-info-row">
+            <span class="info-label">Email:</span>
+            <span class="info-val" id="accountEmail">Not linked</span>
+          </div>
+          <div class="account-info-row">
+            <span class="info-label">User ID:</span>
+            <span class="info-val uid-val" id="accountUid">—</span>
+            <button type="button" id="copyUidBtn" class="copy-small-btn" title="Copy User ID">Copy</button>
+          </div>
+        </div>
+
+        <!-- Quick Preferences -->
+        <div class="account-preferences-row">
+          <button type="button" id="accountToggleThemeBtn" class="account-pref-pill">
+            <span id="accountThemeIcon">🌓</span>
+            <span id="accountThemeLabel">Theme: Dark</span>
+          </button>
+          <button type="button" id="accountToggleSoundBtn" class="account-pref-pill">
+            <span id="accountSoundIcon">🔔</span>
+            <span id="accountSoundLabel">Sound: On</span>
+          </button>
+        </div>
+
+        <!-- Modal Actions -->
+        <div class="modal-actions account-modal-actions">
+          <button type="button" id="accountSignOutBtn" class="btn btn-danger-subtle">Sign Out</button>
+          <div class="actions-right">
+            <button type="button" id="cancelAccountBtn" class="btn btn-secondary">Cancel</button>
+            <button type="submit" id="saveAccountBtn" class="btn btn-primary">Save Changes</button>
+          </div>
+        </div>
+      </form>
+    </div>
   </div>
 
   <!-- ==================== CREATE CHANNEL MODAL ==================== -->

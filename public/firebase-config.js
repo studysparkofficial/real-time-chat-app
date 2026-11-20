@@ -95,6 +95,18 @@ export async function signInAsGuest() {
   return result.user;
 }
 
+// Update Firebase Auth user profile
+export async function updateFirebaseUserProfile(displayName, photoURL) {
+  if (auth.currentUser) {
+    const profileUpdates = {};
+    if (displayName !== undefined && displayName !== null) profileUpdates.displayName = String(displayName).trim();
+    if (photoURL !== undefined && photoURL !== null) profileUpdates.photoURL = String(photoURL);
+    await updateProfile(auth.currentUser, profileUpdates);
+    return auth.currentUser;
+  }
+  return null;
+}
+
 // Sign Out
 export async function logOut() {
   return await signOut(auth);
