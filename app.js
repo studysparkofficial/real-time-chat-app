@@ -164,6 +164,7 @@ const el = {
   appLayout: document.getElementById('appLayout'),
   sidebarLeft: document.getElementById('sidebarLeft'),
   sidebarRight: document.getElementById('sidebarRight'),
+  sidebarBackdrop: document.getElementById('sidebarBackdrop'),
 
   channelList: document.getElementById('channelList'),
   openCreateRoomBtn: document.getElementById('openCreateRoomBtn'),
@@ -993,8 +994,8 @@ function renderChannelList() {
     item.addEventListener('click', () => {
       if (!isActive) {
         switchRoom(room.id);
-        el.sidebarLeft.classList.remove('open');
       }
+      closeMobileDrawers();
     });
 
     el.channelList.appendChild(item);
@@ -1016,7 +1017,14 @@ function renderCurrentRoomHeader() {
   el.welcomeTitle.textContent = `Welcome to #${state.currentRoom.name}!`;
   el.welcomeText.textContent = state.currentRoom.description || `This is the start of #${state.currentRoom.name}.`;
 
-  el.messageTextInput.placeholder = `Type a message in #${state.currentRoom.name}... (Enter to send, Shift+Enter for new line)`;
+  updateMessageInputPlaceholder();
+}
+
+function updateMessageInputPlaceholder() {
+  if (!state.currentRoom) return;
+  el.messageTextInput.placeholder = window.matchMedia('(max-width: 700px)').matches
+    ? `Message #${state.currentRoom.name}…`
+    : `Type a message in #${state.currentRoom.name}... (Enter to send, Shift+Enter for new line)`;
 }
 
 function renderMembersList() {
@@ -2007,6 +2015,10 @@ el.messageSearchInput.addEventListener('input', (e) => {
   });
 });
 
+el.messageSearchInput.closest('.search-box').addEventListener('click', () => {
+  el.messageSearchInput.focus();
+});
+
 // --- Status Selector ---
 el.userStatusSelect.addEventListener('change', (e) => {
   const status = e.target.value;
@@ -2063,16 +2075,64 @@ el.imageLightboxModal.addEventListener('click', (e) => {
 });
 
 // --- Mobile Navigation ---
+function syncMobileDrawerState() {
+  const isMobileWidth = window.matchMedia('(max-width: 900px)').matches;
+  const leftOpen = el.sidebarLeft.classList.contains('open') && window.matchMedia('(max-width: 700px)').matches;
+  const rightOpen = el.sidebarRight.classList.contains('open') && isMobileWidth;
+  const rightVisible = isMobileWidth ? rightOpen : !el.sidebarRight.classList.contains('hidden-sidebar');
+  const hasOpenDrawer = leftOpen || rightOpen;
+
+  el.appLayout.classList.toggle('has-open-sidebar', hasOpenDrawer);
+  el.sidebarBackdrop.setAttribute('aria-hidden', String(!hasOpenDrawer));
+  el.toggleMobileSidebarBtn.setAttribute('aria-expanded', String(leftOpen));
+  el.toggleMembersBtn.setAttribute('aria-expanded', String(rightVisible));
+  el.toggleMobileSidebarBtn.setAttribute('aria-label', leftOpen ? 'Close channels' : 'Open channels');
+  el.toggleMembersBtn.setAttribute('aria-label', isMobileWidth
+    ? (rightOpen ? 'Close channel members' : 'Open channel members')
+    : (rightVisible ? 'Hide channel members' : 'Show channel members'));
+}
+
+function closeMobileDrawers() {
+  el.sidebarLeft.classList.remove('open');
+  el.sidebarRight.classList.remove('open');
+  syncMobileDrawerState();
+}
+
 el.toggleMobileSidebarBtn.addEventListener('click', () => {
-  el.sidebarLeft.classList.toggle('open');
+  const shouldOpen = !el.sidebarLeft.classList.contains('open');
+  el.sidebarRight.classList.remove('open');
+  el.sidebarLeft.classList.toggle('open', shouldOpen);
+  syncMobileDrawerState();
 });
 
 el.toggleMembersBtn.addEventListener('click', () => {
-  el.sidebarRight.classList.toggle('open');
+  if (!window.matchMedia('(max-width: 900px)').matches) {
+    el.sidebarRight.classList.toggle('hidden-sidebar');
+    syncMobileDrawerState();
+    return;
+  }
+
+  const shouldOpen = !el.sidebarRight.classList.contains('open');
+  el.sidebarLeft.classList.remove('open');
+  el.sidebarRight.classList.remove('hidden-sidebar');
+  el.sidebarRight.classList.toggle('open', shouldOpen);
+  syncMobileDrawerState();
+  el.toggleMembersBtn.setAttribute('aria-label', shouldOpen ? 'Close channel members' : 'Open channel members');
 });
 
 el.closeRightSidebarBtn.addEventListener('click', () => {
-  el.sidebarRight.classList.remove('open');
+  closeMobileDrawers();
+});
+
+el.sidebarBackdrop.addEventListener('click', closeMobileDrawers);
+window.addEventListener('resize', () => {
+  if (!window.matchMedia('(max-width: 900px)').matches) {
+    closeMobileDrawers();
+  } else {
+    el.sidebarRight.classList.remove('hidden-sidebar');
+    syncMobileDrawerState();
+  }
+  updateMessageInputPlaceholder();
 });
 
 document.addEventListener('keydown', (e) => {
@@ -2082,8 +2142,11 @@ document.addEventListener('keydown', (e) => {
     closeCodeModal();
     el.floatingReactionPicker.classList.add('hidden');
     el.emojiPickerDropdown.classList.add('hidden');
+    closeMobileDrawers();
   }
 });
+
+syncMobileDrawerState();
 
 // --- Start Up ---
 setupTheme();
