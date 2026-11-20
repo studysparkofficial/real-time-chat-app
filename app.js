@@ -11,6 +11,7 @@ import {
   signInWithEmail, 
   registerWithEmail, 
   signInAsGuest,
+  auth,
   logOut, 
   onAuthUserChanged,
   sendMessageToFirestore,
@@ -23,6 +24,15 @@ import {
   saveCustomRoom,
   listenToCustomRooms
 } from "./firebase-config.js";
+import {
+  getAttachmentCategory,
+  getSecureDownloadUrl,
+  clearSecureDownloadUrlCache,
+  requestUploadAuthorization,
+  uploadFileToS3,
+  validateAttachmentFile,
+  formatBytes as formatAttachmentBytes
+} from "./attachment-service.js";
 
 // --- Web Audio Notification Sound ---
 class SoundFx {
@@ -200,9 +210,13 @@ const el = {
 
   stagedAttachmentBanner: document.getElementById('stagedAttachmentBanner'),
   stagedImagePreview: document.getElementById('stagedImagePreview'),
+  stagedVideoPreview: document.getElementById('stagedVideoPreview'),
   stagedFileIcon: document.getElementById('stagedFileIcon'),
   stagedFileName: document.getElementById('stagedFileName'),
   stagedFileSize: document.getElementById('stagedFileSize'),
+  stagedProgressContainer: document.getElementById('stagedProgressContainer'),
+  stagedProgressBar: document.getElementById('stagedProgressBar'),
+  stagedProgressText: document.getElementById('stagedProgressText'),
   cancelAttachmentBtn: document.getElementById('cancelAttachmentBtn'),
   fileAttachmentInput: document.getElementById('fileAttachmentInput'),
   attachmentBtn: document.getElementById('attachmentBtn'),
@@ -653,6 +667,7 @@ function setupAuthFlow() {
       } catch (err) {
         console.error('Logout error:', err);
       }
+      clearSecureDownloadUrlCache();
 
       state.currentUser = {
         uid: null,
@@ -1074,25 +1089,11 @@ function appendMessageToUI(msg) {
 
   let attachmentHtml = '';
   if (msg.attachment) {
-    if (msg.attachment.type && msg.attachment.type.startsWith('image/')) {
-      attachmentHtml = `
-        <div class="message-attachment">
-          <img class="attachment-image" src="${msg.attachment.data}" alt="${escapeHtml(msg.attachment.name)}" data-name="${escapeHtml(msg.attachment.name)}">
-        </div>
-      `;
-    } else {
-      attachmentHtml = `
-        <div class="message-attachment">
-          <a class="attachment-file-card" href="${msg.attachment.data}" download="${escapeHtml(msg.attachment.name)}">
-            <span class="file-card-icon">📄</span>
-            <div class="file-card-details">
-              <span class="file-card-name">${escapeHtml(msg.attachment.name)}</span>
-              <span class="file-card-size">${formatBytes(msg.attachment.size)}</span>
-            </div>
-          </a>
-        </div>
-      `;
-    }
+    attachmentHtml = `
+      <div class="message-attachment" data-attachment-container>
+        <div class="attachment-file-card">Loading ${escapeHtml(msg.attachment.name || 'attachment')}…</div>
+      </div>
+    `;
   }
 
   let codeHtml = '';
@@ -1142,16 +1143,132 @@ function appendMessageToUI(msg) {
 
   attachMessageRowEvents(row, msg);
   el.messagesContainer.appendChild(row);
+
+  const attachmentContainer = row.querySelector('[data-attachment-container]');
+  if (attachmentContainer) {
+    hydrateMessageAttachment(attachmentContainer, msg);
+  }
+}
+
+async function hydrateMessageAttachment(container, msg) {
+  const attachment = msg.attachment;
+  try {
+    let url = attachment.data || null;
+    if (attachment.key) {
+      const user = auth.currentUser;
+      if (!user) throw new Error('Sign in to view this attachment.');
+      const idToken = await user.getIdToken();
+      url = await getSecureDownloadUrl(
+        msg.roomId || state.currentRoom?.id || 'general',
+        msg.id,
+        attachment.key,
+        idToken,
+        user.uid
+      );
+    }
+    if (!url) throw new Error('The attachment does not have a storage URL.');
+    if (!container.isConnected) return;
+
+    const mimeType = attachment.mimeType || attachment.type || 'application/octet-stream';
+    const category = getAttachmentCategory(mimeType);
+    const name = attachment.name || 'attachment';
+    container.replaceChildren();
+
+    if (category === 'image') {
+      const image = document.createElement('img');
+      image.className = 'attachment-image';
+      image.src = url;
+      image.alt = name;
+      image.dataset.name = name;
+      image.addEventListener('click', () => openAttachmentImage(image));
+      container.appendChild(image);
+      return;
+    }
+
+    if (category === 'video') {
+      const wrap = document.createElement('div');
+      wrap.className = 'attachment-video-wrap';
+      const video = document.createElement('video');
+      video.className = 'attachment-video';
+      video.controls = true;
+      video.playsInline = true;
+      video.preload = 'metadata';
+      video.src = url;
+      wrap.appendChild(video);
+
+      const actions = document.createElement('div');
+      actions.className = 'attachment-media-actions';
+      actions.appendChild(createAttachmentLink('Open video', url, name));
+      actions.appendChild(createAttachmentLink('Download', url, name, true));
+      container.append(wrap, actions);
+      return;
+    }
+
+    if (category === 'pdf') {
+      const card = document.createElement('div');
+      card.className = 'attachment-pdf-card';
+      const left = document.createElement('div');
+      left.className = 'pdf-card-left';
+      const icon = document.createElement('span');
+      icon.className = 'pdf-icon';
+      icon.textContent = '📄';
+      const info = document.createElement('div');
+      info.className = 'pdf-card-info';
+      const title = document.createElement('span');
+      title.className = 'pdf-card-name';
+      title.textContent = name;
+      const meta = document.createElement('span');
+      meta.className = 'pdf-card-meta';
+      meta.textContent = formatAttachmentBytes(attachment.size || 0);
+      info.append(title, meta);
+      left.append(icon, info);
+
+      const actions = document.createElement('div');
+      actions.className = 'pdf-card-actions';
+      actions.appendChild(createAttachmentLink('Open', url, name));
+      actions.appendChild(createAttachmentLink('Download', url, name, true));
+      card.append(left, actions);
+      container.appendChild(card);
+      return;
+    }
+
+    const link = createAttachmentLink(name, url, name, true);
+    link.classList.add('attachment-file-card');
+    const size = document.createElement('span');
+    size.className = 'file-card-size';
+    size.textContent = formatAttachmentBytes(attachment.size || 0);
+    link.appendChild(size);
+    container.appendChild(link);
+  } catch (error) {
+    console.warn('Could not load chat attachment:', error);
+    if (container.isConnected) {
+      container.textContent = 'Attachment unavailable. Try reopening this channel.';
+      container.classList.add('attachment-upload-error');
+    }
+  }
+}
+
+function createAttachmentLink(label, url, filename, download = false) {
+  const link = document.createElement('a');
+  link.className = 'attachment-action-btn';
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = label;
+  if (download) link.download = filename;
+  return link;
+}
+
+function openAttachmentImage(image) {
+  el.lightboxImage.src = image.src;
+  el.lightboxCaption.textContent = image.dataset.name || 'Image';
+  el.imageLightboxModal.classList.remove('hidden');
 }
 
 function attachMessageRowEvents(row, msg) {
   const img = row.querySelector('.attachment-image');
   if (img) {
-    img.addEventListener('click', () => {
-      el.lightboxImage.src = img.src;
-      el.lightboxCaption.textContent = img.dataset.name || 'Image';
-      el.imageLightboxModal.classList.remove('hidden');
-    });
+    img.addEventListener('click', () => openAttachmentImage(img));
   }
 
   const copyCodeBtn = row.querySelector('.copy-code-btn');
@@ -1327,55 +1444,70 @@ el.fileAttachmentInput.addEventListener('change', (e) => {
   stageFileAttachment(file);
 });
 
-function formatBytes(bytes, decimals = 1) {
-  if (!bytes || bytes === 0) return '0 B';
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-}
-
 function stageFileAttachment(file) {
-  // Attachments are stored in the same Firestore message document, which has a 1 MiB limit.
-  // Leave room for base64 encoding and message metadata.
-  const maxFileSize = 700 * 1024;
-  if (file.size > maxFileSize) {
-    showToast(`Files must be at most ${formatBytes(maxFileSize)} to fit in a chat message.`, 'warning');
+  const validation = validateAttachmentFile(file);
+  if (!validation.valid) {
+    showToast(validation.error, 'warning');
     el.fileAttachmentInput.value = '';
     return;
   }
 
-  const reader = new FileReader();
-  reader.onload = (event) => {
-    state.stagedAttachment = {
-      name: file.name,
-      type: file.type || 'application/octet-stream',
-      size: file.size,
-      data: event.target.result
-    };
-
-    el.stagedFileName.textContent = file.name;
-    el.stagedFileSize.textContent = formatBytes(file.size);
-
-    if (file.type.startsWith('image/')) {
-      el.stagedImagePreview.src = event.target.result;
-      el.stagedImagePreview.classList.remove('hidden');
-      el.stagedFileIcon.classList.add('hidden');
-    } else {
-      el.stagedFileIcon.classList.remove('hidden');
-      el.stagedImagePreview.classList.add('hidden');
-    }
-
-    el.stagedAttachmentBanner.classList.remove('hidden');
+  clearStagedAttachment();
+  const previewUrl = URL.createObjectURL(file);
+  state.stagedAttachment = {
+    file,
+    name: file.name,
+    type: validation.mimeType,
+    mimeType: validation.mimeType,
+    category: validation.category,
+    size: file.size,
+    previewUrl
   };
-  reader.readAsDataURL(file);
+
+  el.stagedFileName.textContent = file.name;
+  el.stagedFileSize.textContent = formatAttachmentBytes(file.size);
+  el.stagedProgressBar.style.width = '0%';
+  el.stagedProgressText.textContent = 'Ready to upload';
+  el.stagedProgressContainer.classList.add('hidden');
+  el.stagedImagePreview.classList.add('hidden');
+  el.stagedVideoPreview.classList.add('hidden');
+  el.stagedFileIcon.classList.add('hidden');
+
+  if (validation.category === 'image') {
+    el.stagedImagePreview.src = previewUrl;
+    el.stagedImagePreview.classList.remove('hidden');
+  } else if (validation.category === 'video') {
+    el.stagedVideoPreview.src = previewUrl;
+    el.stagedVideoPreview.classList.remove('hidden');
+  } else {
+    el.stagedFileIcon.classList.remove('hidden');
+    el.stagedFileIcon.textContent = validation.category === 'pdf' ? '📄' : '📎';
+  }
+
+  el.stagedAttachmentBanner.classList.remove('hidden');
+}
+
+function clearStagedAttachment() {
+  if (state.stagedAttachment?.previewUrl) {
+    URL.revokeObjectURL(state.stagedAttachment.previewUrl);
+  }
+  state.stagedAttachment = null;
+  el.fileAttachmentInput.value = '';
+  el.stagedImagePreview.removeAttribute('src');
+  el.stagedVideoPreview.pause();
+  el.stagedVideoPreview.removeAttribute('src');
+  el.stagedVideoPreview.load();
+  el.stagedImagePreview.classList.add('hidden');
+  el.stagedVideoPreview.classList.add('hidden');
+  el.stagedFileIcon.classList.add('hidden');
+  el.stagedProgressBar.style.width = '0%';
+  el.stagedProgressText.textContent = 'Ready to upload';
+  el.stagedProgressContainer.classList.add('hidden');
+  el.stagedAttachmentBanner.classList.add('hidden');
 }
 
 el.cancelAttachmentBtn.addEventListener('click', () => {
-  state.stagedAttachment = null;
-  el.fileAttachmentInput.value = '';
-  el.stagedAttachmentBanner.classList.add('hidden');
+  if (!state.isSending) clearStagedAttachment();
 });
 
 el.messagesViewport.addEventListener('dragover', (e) => {
@@ -1559,6 +1691,7 @@ function handleTyping() {
 let lastSendTimestamp = 0;
 
 async function sendMessage() {
+  if (state.isSending) return;
   const now = Date.now();
   if (now - lastSendTimestamp < 350) return;
 
@@ -1569,75 +1702,146 @@ async function sendMessage() {
 
   if (!text && !attachment && !codeSnippet) return;
 
+  const roomId = state.currentRoom.id;
+  state.isSending = true;
   lastSendTimestamp = now;
-
-  // 1. Clear chat box and staged attachments IMMEDIATELY (0ms)
-  el.messageTextInput.value = '';
-  el.messageTextInput.style.height = 'auto';
-  state.replyTo = null;
-  el.replyPreviewBanner.classList.add('hidden');
-  state.stagedAttachment = null;
-  el.fileAttachmentInput.value = '';
-  el.stagedAttachmentBanner.classList.add('hidden');
-  state.stagedCode = null;
-  el.stagedCodeBanner.classList.add('hidden');
-  el.messageTextInput.focus();
+  const sendButton = el.chatForm.querySelector('button[type="submit"]');
+  [el.messageTextInput, el.fileAttachmentInput, el.attachmentBtn, el.cancelAttachmentBtn,
+    el.codeSnippetModalBtn, sendButton].filter(Boolean).forEach(control => { control.disabled = true; });
 
   // Reset typing
   clearTimeout(state.typingTimeout);
   state.isTyping = false;
   if (state.currentUser.username) {
-    setFirestoreTyping(state.currentRoom.id, state.currentUser.username, false).catch(() => {});
+    setFirestoreTyping(roomId, state.currentUser.username, false).catch(() => {});
     broadcastSync({
       type: 'TYPING',
-      roomId: state.currentRoom.id,
+      roomId,
       typers: []
     });
   }
 
-  // 2. Build message object
-  const msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-  const messagePayload = {
-    id: msgId,
-    clientMsgId: msgId,
-    roomId: state.currentRoom.id,
-    text,
-    sender: {
-      username: state.currentUser.username || 'Anonymous',
-      avatar: state.currentUser.avatar || '⚡',
-      email: state.currentUser.email || null,
-      uid: state.currentUser.uid || null
-    },
-    replyTo,
-    attachment,
-    codeSnippet,
-    reactions: {},
-    timestamp: Date.now()
-  };
-
-  // 3. Immediately render locally
-  state.messages.push(messagePayload);
-  state.messages = deduplicateMessagesList(state.messages);
-  appendMessageToUI(messagePayload);
-  state.lastRenderedMessageId = msgId;
-  saveLocalRoomMessages(state.currentRoom.id, state.messages);
-  scrollToBottom(true);
-
-  // 4. Instantly broadcast to all other open tabs/windows
-  broadcastSync({
-    type: 'NEW_MESSAGE',
-    roomId: state.currentRoom.id,
-    message: messagePayload
-  });
-
-  // 5. Asynchronously persist to Cloud Firestore in the background
-  sendMessageToFirestore(state.currentRoom.id, messagePayload).catch((err) => {
-    console.warn('Firestore cloud sync notice:', err);
-    if (!state.firestoreNoticeShown) {
-      state.firestoreNoticeShown = true;
-      showToast('Real-time cloud database not active: Create your Firestore Database in Firebase Console (Build > Firestore Database > Create Database) to sync across different computers/phones.', 'warning', 8000);
+  try {
+    // Keep the same document ID if S3 succeeds but Firestore needs a retry.
+    let msgId = attachment?.pendingMessageId;
+    if (!msgId) {
+      msgId = 'msg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
+      if (attachment) attachment.pendingMessageId = msgId;
     }
-  });
+    let messageTimestamp = attachment?.pendingTimestamp;
+    if (!messageTimestamp) {
+      messageTimestamp = Date.now();
+      if (attachment) attachment.pendingTimestamp = messageTimestamp;
+    }
+
+    let storedAttachment = null;
+    if (attachment) {
+      el.stagedProgressContainer.classList.remove('hidden');
+      el.stagedProgressText.textContent = 'Getting a secure S3 upload link…';
+
+      if (attachment.uploadedAttachment) {
+        storedAttachment = attachment.uploadedAttachment;
+      } else {
+        const user = auth.currentUser;
+        if (!user) throw new Error('Sign in with Google, email, or an authenticated guest account to upload media.');
+        const idToken = await user.getIdToken();
+        const authorization = await requestUploadAuthorization(attachment.file, idToken);
+
+        el.stagedProgressText.textContent = 'Uploading to S3…';
+        const uploaded = await uploadFileToS3(authorization, attachment.file, (percent, loaded, total) => {
+          el.stagedProgressBar.style.width = `${percent}%`;
+          el.stagedProgressText.textContent = `Uploading ${percent}% · ${formatAttachmentBytes(loaded)} / ${formatAttachmentBytes(total)}`;
+        }, attachment.mimeType);
+
+        storedAttachment = {
+          key: uploaded.key,
+          name: uploaded.name,
+          mimeType: attachment.mimeType,
+          type: attachment.mimeType,
+          category: attachment.category,
+          size: uploaded.size
+        };
+        attachment.uploadedAttachment = storedAttachment;
+      }
+    }
+
+    const messagePayload = {
+      id: msgId,
+      clientMsgId: msgId,
+      roomId,
+      text,
+      sender: {
+        username: state.currentUser.username || 'Anonymous',
+        avatar: state.currentUser.avatar || '⚡',
+        email: state.currentUser.email || null,
+        uid: state.currentUser.uid || null
+      },
+      replyTo,
+      attachment: storedAttachment,
+      codeSnippet,
+      reactions: {},
+      timestamp: messageTimestamp
+    };
+
+    const cloudSave = sendMessageToFirestore(roomId, messagePayload);
+    if (storedAttachment) {
+      try {
+        await cloudSave;
+      } catch (err) {
+        console.warn('Attachment uploaded but Firestore sync failed:', err);
+        throw err;
+      }
+    }
+
+    el.messageTextInput.value = '';
+    el.messageTextInput.style.height = 'auto';
+    if (state.replyTo === replyTo) {
+      state.replyTo = null;
+      el.replyPreviewBanner.classList.add('hidden');
+    }
+    if (attachment && state.stagedAttachment === attachment) clearStagedAttachment();
+    if (state.stagedCode === codeSnippet) {
+      state.stagedCode = null;
+      el.stagedCodeBanner.classList.add('hidden');
+    }
+
+    if (state.currentRoom.id === roomId) {
+      state.messages.push(messagePayload);
+      state.messages = deduplicateMessagesList(state.messages);
+      appendMessageToUI(messagePayload);
+      state.lastRenderedMessageId = msgId;
+      scrollToBottom(true);
+    }
+    saveLocalRoomMessages(roomId, [...getLocalRoomMessages(roomId), messagePayload]);
+    broadcastSync({ type: 'NEW_MESSAGE', roomId, message: messagePayload });
+
+    if (!storedAttachment) {
+      cloudSave.catch((err) => {
+        console.warn('Firestore cloud sync notice:', err);
+        if (!state.firestoreNoticeShown) {
+          state.firestoreNoticeShown = true;
+          showToast('Real-time cloud database not active. This message will only sync between open tabs.', 'warning', 8000);
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Message send failed:', err);
+    const failureMessage = attachment?.uploadedAttachment
+      ? `The file uploaded to S3, but the message could not sync: ${err.message || 'Firestore error'}`
+      : (err.message || 'Message or media upload failed. Your draft is still here.');
+    showToast(failureMessage, 'error', 8000);
+    if (attachment && state.stagedAttachment === attachment) {
+      el.stagedProgressContainer.classList.remove('hidden');
+      el.stagedProgressText.textContent = attachment.uploadedAttachment
+        ? 'Uploaded to S3; send again to retry message sync.'
+        : 'Upload failed; send again to retry.';
+    }
+  } finally {
+    state.isSending = false;
+    [el.messageTextInput, el.fileAttachmentInput, el.attachmentBtn, el.cancelAttachmentBtn,
+      el.codeSnippetModalBtn, sendButton].filter(Boolean).forEach(control => { control.disabled = false; });
+    if (state.currentRoom.id === roomId) el.messageTextInput.focus();
+  }
 }
 
 // --- Scroll Management ---

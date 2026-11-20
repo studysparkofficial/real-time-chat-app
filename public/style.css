@@ -771,6 +771,177 @@ html, body {
   color: var(--text-muted);
 }
 
+/* Enhanced Video Player in Message */
+.attachment-video-wrap {
+  margin-top: 8px;
+  max-width: 480px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  background-color: #000;
+}
+
+.attachment-video {
+  width: 100%;
+  max-height: 340px;
+  display: block;
+  border-radius: var(--radius-md);
+}
+
+.attachment-media-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.attachment-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.attachment-action-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-primary);
+}
+
+/* Enhanced PDF Document Card */
+.attachment-pdf-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-left: 4px solid #ef4444;
+  border-radius: var(--radius-md);
+  max-width: 440px;
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition-fast), border-color var(--transition-fast);
+  margin-top: 8px;
+}
+
+.attachment-pdf-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.pdf-card-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.pdf-icon {
+  font-size: 26px;
+  flex-shrink: 0;
+}
+
+.pdf-card-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pdf-card-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.pdf-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.pdf-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Staged Upload Progress Bar */
+.staged-progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  width: 100%;
+}
+
+.staged-progress-bar-bg {
+  height: 6px;
+  width: 180px;
+  background-color: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.staged-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-primary), #6366f1);
+  transition: width 0.2s ease;
+  border-radius: 999px;
+}
+
+.staged-progress-text {
+  font-size: 0.70rem;
+  color: var(--accent-primary);
+  font-weight: 500;
+}
+
+/* Upload Error & Retry */
+.attachment-upload-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: var(--radius-sm);
+  color: #f87171;
+  font-size: 0.78rem;
+  margin-top: 6px;
+}
+
+.attachment-retry-btn {
+  background-color: transparent;
+  border: 1px solid #f87171;
+  color: #f87171;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.attachment-retry-btn:hover {
+  background-color: #f87171;
+  color: #fff;
+}
+
 /* Code Snippet Box */
 .message-code-block {
   margin-top: 8px;

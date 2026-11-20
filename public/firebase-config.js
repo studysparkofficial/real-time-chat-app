@@ -116,6 +116,7 @@ export async function sendMessageToFirestore(roomId, messageData) {
   const payload = {
     id: docId,
     clientMsgId: docId,
+    roomId: messageData.roomId || roomId,
     text: messageData.text || '',
     sender: {
       username: messageData.sender.username,
@@ -123,16 +124,26 @@ export async function sendMessageToFirestore(roomId, messageData) {
       email: messageData.sender.email || null,
       uid: messageData.sender.uid || null
     },
+    senderId: messageData.senderId || messageData.sender?.uid || null,
+    type: messageData.type || (messageData.attachment ? (messageData.attachment.mimeType?.startsWith('image/') || messageData.attachment.type?.startsWith('image/') ? 'image' : messageData.attachment.mimeType?.startsWith('video/') || messageData.attachment.type?.startsWith('video/') ? 'video' : messageData.attachment.mimeType === 'application/pdf' ? 'pdf' : 'file') : (messageData.codeSnippet ? 'code' : 'text')),
     replyTo: messageData.replyTo || null,
-    attachment: messageData.attachment || null,
+    attachment: messageData.attachment ? {
+      key: messageData.attachment.key || null,
+      name: messageData.attachment.name || 'attachment',
+      mimeType: messageData.attachment.mimeType || messageData.attachment.type || 'application/octet-stream',
+      type: messageData.attachment.type || messageData.attachment.mimeType || 'application/octet-stream',
+      size: messageData.attachment.size || 0,
+      data: messageData.attachment.data || null
+    } : null,
     codeSnippet: messageData.codeSnippet || null,
     reactions: messageData.reactions || {},
-    timestamp: messageData.timestamp || Date.now()
+    timestamp: messageData.timestamp || Date.now(),
+    createdAt: serverTimestamp()
   };
 
   const savePromise = setDoc(msgDocRef, payload);
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Cloud sync timeout: verify Firestore Database is created in Firebase Console')), 5000)
+    setTimeout(() => reject(new Error('Cloud sync timeout: verify Firestore Database is created in Firebase Console')), 8000)
   );
 
   await Promise.race([savePromise, timeoutPromise]);
