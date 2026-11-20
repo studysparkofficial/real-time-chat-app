@@ -236,7 +236,7 @@ export function uploadFileToS3(uploadData, file, onProgress, contentType = file.
  * Securely fetch a presigned GET download URL for an attachment
  * Checks local memory cache before hitting backend API
  */
-export async function getSecureDownloadUrl(roomId, messageId, key, idToken, userId = 'anonymous') {
+export async function getSecureDownloadUrl(roomId, messageId, key, idToken, userId = 'anonymous', mimeType = null) {
   if (!key) return null;
 
   // Check cache
@@ -250,12 +250,28 @@ export async function getSecureDownloadUrl(roomId, messageId, key, idToken, user
     throw new Error('Authentication required to view attachment.');
   }
 
+  // Resolve MIME type and filename
+  let resolvedContentType = mimeType;
+  if (!resolvedContentType && key) {
+    const ext = key.split('.').pop().toLowerCase();
+    if (ext === 'pdf') resolvedContentType = 'application/pdf';
+    else if (ext === 'jpg' || ext === 'jpeg') resolvedContentType = 'image/jpeg';
+    else if (ext === 'png') resolvedContentType = 'image/png';
+    else if (ext === 'webp') resolvedContentType = 'image/webp';
+    else if (ext === 'mp4') resolvedContentType = 'video/mp4';
+    else if (ext === 'webm') resolvedContentType = 'video/webm';
+  }
+
+  const fileName = key.split('/').pop() || 'attachment';
+
   // Request download URL from backend
   const payload = {
     roomId,
     messageId,
     key,
-    action: 'download' // Fallback flag in case API Gateway routes to upload-url handler
+    action: 'download',
+    contentType: resolvedContentType || 'application/pdf',
+    fileName
   };
 
   let response;
@@ -273,23 +289,32 @@ export async function getSecureDownloadUrl(roomId, messageId, key, idToken, user
     // network issue
   }
 
-  // If /download-url returned 404 (route not registered on API Gateway yet),
+  // If /download-url returned 404 or 403 (route not registered or missing auth token in API Gateway),
   // fall back seamlessly to POST /upload-url which dispatches by body.action === 'download'
-  if (!response || response.status === 404) {
-    response = await fetch(`${API_BASE_URL}/upload-url`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${idToken}`
-      },
-      body: JSON.stringify(payload)
-    });
+  if (!response || response.status === 404 || response.status === 403) {
+    try {
+      const fallbackResponse = await fetch(`${API_BASE_URL}/upload-url`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${idToken}`
+        },
+        body: JSON.stringify(payload)
+      });
+      if (fallbackResponse && fallbackResponse.ok) {
+        response = fallbackResponse;
+      } else if (!response) {
+        response = fallbackResponse;
+      }
+    } catch (fallbackErr) {
+      // network issue
+    }
   }
 
-  const data = await response.json().catch(() => ({}));
+  const data = await response?.json().catch(() => ({})) || {};
 
-  if (!response.ok) {
-    throw new Error(data.error || `Unable to load attachment (HTTP ${response.status})`);
+  if (!response || !response.ok) {
+    throw new Error(data.error || `Unable to load attachment (HTTP ${response?.status || 'network error'})`);
   }
 
   if (!data.downloadUrl) {

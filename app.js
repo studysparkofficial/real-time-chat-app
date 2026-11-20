@@ -283,6 +283,23 @@ function connectAndJoinRoom(userData, targetRoomId = 'general') {
   localStorage.setItem('pulsechat_username', userData.username);
   localStorage.setItem('pulsechat_avatar', userData.avatar);
 
+  const userUid = state.currentUser.uid;
+  const previousActiveUid = localStorage.getItem('pulsechat_active_uid');
+  if (previousActiveUid && previousActiveUid !== userUid) {
+    clearAllCachedMessages();
+  }
+  localStorage.setItem('pulsechat_active_uid', userUid);
+
+  // User join timestamp: If first time this user logs in, set joinedAt to Date.now() so old chats are hidden!
+  const storedJoinedAt = localStorage.getItem(`pulsechat_joined_at_${userUid}`);
+  if (storedJoinedAt) {
+    state.currentUser.joinedAt = Number(storedJoinedAt);
+  } else {
+    state.currentUser.joinedAt = Date.now();
+    localStorage.setItem(`pulsechat_joined_at_${userUid}`, String(state.currentUser.joinedAt));
+    clearAllCachedMessages();
+  }
+
   updateUserProfileUI();
   el.joinModal.classList.add('hidden');
   hideLoading();
@@ -357,7 +374,7 @@ function switchRoom(roomId) {
 
   // Load cached messages for immediate rendering
   const localMsgs = getLocalRoomMessages(target.id);
-  state.messages = deduplicateMessagesList(localMsgs || []);
+  state.messages = filterMessagesForCurrentUser(deduplicateMessagesList(localMsgs || []));
   renderAllMessages();
   scrollToBottom(false);
 
@@ -367,8 +384,10 @@ function switchRoom(roomId) {
 
   state.unsubscribeMessages = listenToRoomMessages(target.id, (messages) => {
     if (messages) {
+      // Filter out messages that were sent BEFORE this user joined
+      const filtered = filterMessagesForCurrentUser(messages);
       // Deduplicate: merge incoming Firestore messages with existing local messages
-      const merged = deduplicateMessagesList([...messages, ...state.messages]);
+      const merged = deduplicateMessagesList([...filtered, ...state.messages]);
       const lastMsg = merged[merged.length - 1];
       const isNewIncoming = Boolean(state.lastRenderedMessageId && lastMsg && lastMsg.id !== state.lastRenderedMessageId);
 
@@ -377,7 +396,7 @@ function switchRoom(roomId) {
       renderAllMessages();
       state.lastRenderedMessageId = lastMsg ? lastMsg.id : null;
 
-      if (isNewIncoming && lastMsg && lastMsg.sender && lastMsg.sender.username !== state.currentUser.username) {
+      if (isNewIncoming && lastMsg && lastMsg.sender && !isMessageFromSelf(lastMsg)) {
         soundFx.playMessagePop();
       }
 
@@ -669,6 +688,7 @@ function setupAuthFlow() {
         console.error('Logout error:', err);
       }
       clearSecureDownloadUrlCache();
+      clearAllCachedMessages();
 
       state.currentUser = {
         uid: null,
@@ -678,11 +698,13 @@ function setupAuthFlow() {
         status: 'online',
         room: 'general',
         isAuth: false,
-        isGuest: false
+        isGuest: false,
+        joinedAt: null
       };
 
       localStorage.removeItem('pulsechat_username');
       localStorage.removeItem('pulsechat_avatar');
+      localStorage.removeItem('pulsechat_active_uid');
 
       el.joinModal.classList.remove('hidden');
       el.messagesContainer.innerHTML = '';
@@ -799,7 +821,9 @@ function deduplicateMessagesList(messages) {
 
 function getLocalRoomMessages(roomId) {
   try {
-    const raw = localStorage.getItem(`pulsechat_msgs_${roomId}`);
+    const userUid = state.currentUser?.uid;
+    if (!userUid) return [];
+    const raw = localStorage.getItem(`pulsechat_msgs_${userUid}_${roomId}`);
     const parsed = raw ? JSON.parse(raw) : [];
     return deduplicateMessagesList(parsed);
   } catch (e) {
@@ -809,12 +833,71 @@ function getLocalRoomMessages(roomId) {
 
 function saveLocalRoomMessages(roomId, messages) {
   try {
+    const userUid = state.currentUser?.uid;
+    if (!userUid) return;
     const clean = deduplicateMessagesList(messages || []);
     const trimmed = clean.slice(-150);
-    localStorage.setItem(`pulsechat_msgs_${roomId}`, JSON.stringify(trimmed));
+    localStorage.setItem(`pulsechat_msgs_${userUid}_${roomId}`, JSON.stringify(trimmed));
   } catch (e) {
     // Storage full or private mode
   }
+}
+
+function clearAllCachedMessages() {
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('pulsechat_msgs_') || key.startsWith('pulsechat_messages_'))) {
+        localStorage.removeItem(key);
+      }
+    }
+  } catch (e) {}
+}
+
+function isMessageFromSelf(msg) {
+  if (!msg || !msg.sender) return false;
+  const myUid = state.currentUser?.uid;
+  const senderUid = msg.sender.uid || msg.senderId;
+
+  // 1. Strict UID matching
+  if (myUid && senderUid) {
+    return myUid === senderUid;
+  }
+
+  // 2. Strict Email matching if available
+  const myEmail = state.currentUser?.email;
+  const senderEmail = msg.sender?.email;
+  if (myEmail && senderEmail) {
+    return myEmail.toLowerCase() === senderEmail.toLowerCase();
+  }
+
+  // 3. Fall back to username only if not a generic name
+  const myName = (state.currentUser?.username || '').trim();
+  const senderName = (msg.sender?.username || '').trim();
+  if (myName && senderName) {
+    const lower = myName.toLowerCase();
+    const isGeneric = lower === 'guest' || lower === 'anonymous' || lower === 'user' || lower.startsWith('guest_');
+    if (!isGeneric) {
+      return myName === senderName;
+    }
+  }
+
+  return false;
+}
+
+function filterMessagesForCurrentUser(messages) {
+  if (!messages || !Array.isArray(messages)) return [];
+  const joinedAt = state.currentUser?.joinedAt;
+  if (!joinedAt) return messages;
+
+  return messages.filter(msg => {
+    // Always include messages sent by current user
+    if (isMessageFromSelf(msg)) return true;
+
+    // For other users, only include messages sent after this user joined
+    const msgTime = Number(msg.timestamp) || 0;
+    return msgTime >= (joinedAt - 10000);
+  });
 }
 
 if (syncChannel) {
@@ -834,7 +917,7 @@ if (syncChannel) {
           appendMessageToUI(data.message);
           state.lastRenderedMessageId = data.message.id;
 
-          if (data.message.sender && data.message.sender.username !== state.currentUser.username) {
+          if (data.message.sender && !isMessageFromSelf(data.message)) {
             soundFx.playMessagePop();
           }
 
@@ -965,7 +1048,8 @@ function renderMembersList() {
   el.membersList.innerHTML = '';
 
   displayList.forEach((user) => {
-    const isMe = (state.currentUser.uid && user.uid === state.currentUser.uid) || user.username === state.currentUser.username;
+    const isMe = (state.currentUser.uid && user.uid === state.currentUser.uid) || 
+      (state.currentUser.username && user.username === state.currentUser.username && !['guest', 'anonymous'].includes(user.username.toLowerCase()));
     const row = document.createElement('div');
     row.className = 'member-row';
     row.innerHTML = `
@@ -992,9 +1076,10 @@ function renderMembersList() {
 
 function renderAllMessages() {
   el.messagesContainer.innerHTML = '';
-  state.messages = deduplicateMessagesList(state.messages);
+  const filtered = filterMessagesForCurrentUser(deduplicateMessagesList(state.messages));
+  state.messages = filtered;
 
-  state.messages.forEach((msg) => {
+  filtered.forEach((msg) => {
     appendMessageToUI(msg);
   });
 }
@@ -1031,6 +1116,13 @@ function formatMarkdown(text) {
 function appendMessageToUI(msg) {
   if (!msg) return;
 
+  const isSelf = isMessageFromSelf(msg);
+  const joinedAt = state.currentUser?.joinedAt;
+  const msgTime = Number(msg.timestamp) || 0;
+  if (!isSelf && joinedAt && msgTime < (joinedAt - 10000)) {
+    return;
+  }
+
   // Prevent duplicate insertion in DOM by ID
   if (msg.id && document.getElementById(`msg-el-${msg.id}`)) {
     return;
@@ -1062,11 +1154,6 @@ function appendMessageToUI(msg) {
       }
     }
   }
-
-  const isSelf = msg.sender && (
-    (state.currentUser.uid && msg.sender.uid && msg.sender.uid === state.currentUser.uid) ||
-    (state.currentUser.username && msg.sender.username === state.currentUser.username)
-  );
 
   const row = document.createElement('div');
   row.className = `message-row ${isSelf ? 'is-outgoing' : 'is-incoming'}`;
@@ -1164,7 +1251,8 @@ async function hydrateMessageAttachment(container, msg) {
         msg.id,
         attachment.key,
         idToken,
-        user.uid
+        user.uid,
+        attachment.mimeType || attachment.type
       );
     }
     if (!url) throw new Error('The attachment does not have a storage URL.');
@@ -1210,6 +1298,11 @@ async function hydrateMessageAttachment(container, msg) {
       card.className = 'attachment-pdf-card';
       const left = document.createElement('div');
       left.className = 'pdf-card-left';
+      left.style.cursor = 'pointer';
+      left.title = `Click to view ${name}`;
+      left.addEventListener('click', () => {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      });
       const icon = document.createElement('span');
       icon.className = 'pdf-icon';
       icon.textContent = '📄';
@@ -1500,8 +1593,8 @@ function stageFileAttachment(file) {
   el.stagedAttachmentBanner.classList.remove('hidden');
 }
 
-function clearStagedAttachment() {
-  if (state.stagedAttachment?.previewUrl) {
+function clearStagedAttachment(revokeUrl = true) {
+  if (revokeUrl && state.stagedAttachment?.previewUrl) {
     URL.revokeObjectURL(state.stagedAttachment.previewUrl);
   }
   state.stagedAttachment = null;
@@ -1768,6 +1861,8 @@ async function sendMessage() {
 
         if (uploaded.downloadUrl) {
           seedDownloadUrl(user.uid, uploaded.key, uploaded.downloadUrl, 3600);
+        } else if (attachment.previewUrl) {
+          seedDownloadUrl(user.uid, uploaded.key, attachment.previewUrl, 7200);
         }
 
         storedAttachment = {
@@ -1817,7 +1912,7 @@ async function sendMessage() {
       state.replyTo = null;
       el.replyPreviewBanner.classList.add('hidden');
     }
-    if (attachment && state.stagedAttachment === attachment) clearStagedAttachment();
+    if (attachment && state.stagedAttachment === attachment) clearStagedAttachment(false);
     if (state.stagedCode === codeSnippet) {
       state.stagedCode = null;
       el.stagedCodeBanner.classList.add('hidden');

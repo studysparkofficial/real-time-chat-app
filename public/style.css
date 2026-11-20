@@ -457,6 +457,8 @@ html, body {
   flex-direction: column;
   gap: 14px;
   margin-top: auto;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 /* System Message */
@@ -489,22 +491,27 @@ html, body {
   transition: transform var(--transition-fast);
   max-width: 78%;
   width: fit-content;
+  box-sizing: border-box;
 }
 
 /* Incoming Messages (Other Users - Left Aligned) */
 .message-row.is-incoming {
-  align-self: flex-start;
-  margin-right: auto;
+  align-self: flex-start !important;
+  margin-right: auto !important;
+  margin-left: 0 !important;
+  flex-direction: row !important;
 }
 
 .message-row.is-incoming .message-content {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  text-align: left;
 }
 
 .message-row.is-incoming .message-header {
   display: flex;
+  flex-direction: row;
   align-items: baseline;
   gap: 8px;
   margin-bottom: 4px;
@@ -517,6 +524,7 @@ html, body {
   padding: 10px 14px;
   color: var(--text-primary);
   box-shadow: var(--shadow-sm);
+  text-align: left;
 }
 
 .message-row.is-incoming:hover .message-text {
@@ -525,15 +533,17 @@ html, body {
 
 /* Outgoing Messages (Current User - Right Aligned) */
 .message-row.is-outgoing {
-  align-self: flex-end;
-  margin-left: auto;
-  flex-direction: row-reverse;
+  align-self: flex-end !important;
+  margin-left: auto !important;
+  margin-right: 0 !important;
+  flex-direction: row-reverse !important;
 }
 
 .message-row.is-outgoing .message-content {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  text-align: right;
 }
 
 .message-row.is-outgoing .message-header {
