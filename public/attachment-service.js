@@ -116,18 +116,27 @@ export async function requestUploadAuthorization(file, idToken) {
 
   const endpoint = `${API_BASE_URL}/upload-url`;
 
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${idToken}`
-    },
-    body: JSON.stringify({
-      fileName: file.name,
-      contentType: validation.mimeType,
-      size: file.size
-    })
-  });
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`
+      },
+      body: JSON.stringify({
+        fileName: file.name,
+        contentType: validation.mimeType,
+        size: file.size
+      })
+    });
+  } catch (networkErr) {
+    console.error('API Gateway request failed:', networkErr);
+    if (networkErr.message && (networkErr.message.includes('fetch') || networkErr.name === 'TypeError')) {
+      throw new Error('API Gateway CORS blocked: please enable CORS on API Gateway (JNUCampusConnectMediaAPI).');
+    }
+    throw networkErr;
+  }
 
   const data = await response.json().catch(() => ({}));
 

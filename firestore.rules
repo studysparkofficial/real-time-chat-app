@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Messages collection under rooms
+    match /rooms/{roomId}/messages/{messageId} {
+      // Authenticated users can read chat messages
+      allow read: if isAuthenticated();
+
+      // Creating a message: must be from the authenticated sender
+      allow create: if isAuthenticated()
+        && request.resource.data.sender.uid == request.auth.uid
+        && (
+          // Text-only or code message
+          (request.resource.data.attachment == null) ||
+          // Attachment message: validate 50 MB, allowed mimeTypes, and user-scoped S3 key
+          (
+            request.resource.data.attachment.key is string
+            && request.resource.data.attachment.key.matches('^chats/' + request.auth.uid + '/.*')
+            && request.resource.data.attachment.size is int
+            && request.resource.data.attachment.size > 0
+            && request.resource.data.attachment.size <= 52428800
+            && request.resource.data.attachment.mimeType in [
+              'image/jpeg', 'image/png', 'image/webp',
+              'video/mp4', 'video/webm', 'application/pdf'
+            ]
+          )
+        );
+
+      // Updating a message: allows emoji reactions by any room member, or editing by message owner
+      allow update: if isAuthenticated()
+        && (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) ||
+          resource.data.sender.uid == request.auth.uid
+        );
+
+      // Deleting a message: sender only
+      allow delete: if isAuthenticated()
+        && resource.data.sender.uid == request.auth.uid;
+    }
+
+    // Room typing indicators
+    match /rooms/{roomId}/typing/{userKey} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Online users presence
+    match /online_users/{userKey} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated()
+        && (request.auth.uid == userKey || request.auth.uid == request.resource.data.uid);
+    }
+
+    // Custom channels
+    match /custom_rooms/{roomId} {
+      allow read, write: if isAuthenticated();
+    }
+  }
+}
