@@ -28,6 +28,7 @@ import {
   getAttachmentCategory,
   getSecureDownloadUrl,
   clearSecureDownloadUrlCache,
+  seedDownloadUrl,
   requestUploadAuthorization,
   uploadFileToS3,
   validateAttachmentFile,
@@ -1153,8 +1154,8 @@ function appendMessageToUI(msg) {
 async function hydrateMessageAttachment(container, msg) {
   const attachment = msg.attachment;
   try {
-    let url = attachment.data || null;
-    if (attachment.key) {
+    let url = attachment.previewUrl || attachment.data || null;
+    if (!url && attachment.key) {
       const user = auth.currentUser;
       if (!user) throw new Error('Sign in to view this attachment.');
       const idToken = await user.getIdToken();
@@ -1242,8 +1243,20 @@ async function hydrateMessageAttachment(container, msg) {
   } catch (error) {
     console.warn('Could not load chat attachment:', error);
     if (container.isConnected) {
-      container.textContent = 'Attachment unavailable. Try reopening this channel.';
-      container.classList.add('attachment-upload-error');
+      container.replaceChildren();
+      const errBox = document.createElement('div');
+      errBox.className = 'attachment-upload-error';
+      errBox.innerHTML = `<span>🔒 Attachment load error: ${escapeHtml(error.message || 'error')}</span>`;
+      const retryBtn = document.createElement('button');
+      retryBtn.className = 'attachment-retry-btn';
+      retryBtn.textContent = 'Retry';
+      retryBtn.onclick = (e) => {
+        e.stopPropagation();
+        container.textContent = 'Loading attachment…';
+        hydrateMessageAttachment(container, msg);
+      };
+      errBox.appendChild(retryBtn);
+      container.appendChild(errBox);
     }
   }
 }
@@ -1753,13 +1766,18 @@ async function sendMessage() {
           el.stagedProgressText.textContent = `Uploading ${percent}% · ${formatAttachmentBytes(loaded)} / ${formatAttachmentBytes(total)}`;
         }, attachment.mimeType);
 
+        if (uploaded.downloadUrl) {
+          seedDownloadUrl(user.uid, uploaded.key, uploaded.downloadUrl, 3600);
+        }
+
         storedAttachment = {
           key: uploaded.key,
           name: uploaded.name,
           mimeType: attachment.mimeType,
           type: attachment.mimeType,
           category: attachment.category,
-          size: uploaded.size
+          size: uploaded.size,
+          previewUrl: attachment.previewUrl || uploaded.downloadUrl || null
         };
         attachment.uploadedAttachment = storedAttachment;
       }

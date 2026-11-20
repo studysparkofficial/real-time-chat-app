@@ -27,6 +27,13 @@ export function clearSecureDownloadUrlCache() {
   downloadUrlCache.clear();
 }
 
+export function seedDownloadUrl(userId, key, url, ttlSeconds = 3600) {
+  if (!key || !url) return;
+  const expiresAt = Date.now() + ttlSeconds * 1000;
+  if (userId) downloadUrlCache.set(`${userId}:${key}`, { url, expiresAt });
+  downloadUrlCache.set(key, { url, expiresAt });
+}
+
 /**
  * Format bytes to human readable string (KB, MB)
  */
@@ -174,12 +181,16 @@ export function uploadFileToS3(uploadData, file, onProgress, contentType = file.
 
     xhr.addEventListener('load', () => {
       if (xhr.status >= 200 && xhr.status < 300) {
+        if (uploadData.downloadUrl) {
+          seedDownloadUrl(null, uploadData.key, uploadData.downloadUrl, uploadData.expiresIn || 3600);
+        }
         resolve({
           success: true,
           key: uploadData.key,
           size: file.size,
           name: file.name,
-          mimeType: contentType
+          mimeType: contentType,
+          downloadUrl: uploadData.downloadUrl || null
         });
       } else {
         let msg = `S3 upload failed (HTTP ${xhr.status})`;
@@ -230,7 +241,7 @@ export async function getSecureDownloadUrl(roomId, messageId, key, idToken, user
 
   // Check cache
   const cacheKey = `${userId}:${key}`;
-  const cached = downloadUrlCache.get(cacheKey);
+  const cached = downloadUrlCache.get(cacheKey) || downloadUrlCache.get(key);
   if (cached && (cached.expiresAt - Date.now() > 30000)) {
     return cached.url;
   }
