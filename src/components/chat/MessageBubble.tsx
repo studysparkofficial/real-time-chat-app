@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Clock,
   Check,
@@ -9,12 +9,13 @@ import {
   Smile,
   Trash2,
   FileText,
-  Download
+  Download,
+  Loader2
 } from 'lucide-react';
 import { ChatMessage, ChatUser } from '../../types/chat.types';
 import { Avatar } from '../common/Avatar';
 import { renderMarkdownToSafeHtml } from '../../services/sanitize';
-import { formatBytes } from '../../services/s3Service';
+import { formatBytes, getPresignedDownloadUrl } from '../../services/s3Service';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -58,6 +59,61 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const isOutgoing = currentUser ? message.sender.uid === currentUser.uid : false;
   const senderColor = getSenderColor(message.sender.displayName || 'Scholar');
+
+  // Media attachment URL resolution with automatic presigned S3 hydration
+  const initialMediaUrl =
+    message.attachment?.previewUrl ||
+    message.attachment?.url ||
+    message.attachment?.downloadUrl ||
+    '';
+
+  const [mediaUrl, setMediaUrl] = useState<string>(initialMediaUrl);
+  const [mediaLoading, setMediaLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isCurrent = true;
+    const att = message.attachment;
+    if (!att || !att.key) return;
+
+    const currentUrl = att.previewUrl || att.url || att.downloadUrl || '';
+
+    // If already a local data/blob URL, or already has AWS presigned signature, use it
+    if (
+      currentUrl.startsWith('data:') ||
+      currentUrl.startsWith('blob:') ||
+      currentUrl.includes('X-Amz-Signature') ||
+      currentUrl.includes('Signature=')
+    ) {
+      setMediaUrl(currentUrl);
+      return;
+    }
+
+    // Otherwise, fetch signed GetObject URL from API Gateway
+    setMediaLoading(true);
+    getPresignedDownloadUrl(att.key, message.roomId, message.id)
+      .then((signedUrl) => {
+        if (isCurrent && signedUrl) {
+          setMediaUrl(signedUrl);
+        }
+        if (isCurrent) setMediaLoading(false);
+      })
+      .catch(() => {
+        if (isCurrent) setMediaLoading(false);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [message.attachment, message.roomId, message.id]);
+
+  const handleMediaError = () => {
+    const key = message.attachment?.key;
+    if (key) {
+      getPresignedDownloadUrl(key, message.roomId, message.id).then((freshUrl) => {
+        if (freshUrl) setMediaUrl(freshUrl);
+      });
+    }
+  };
 
   // Format time (e.g. 10:45 AM)
   const timeString = new Date(message.timestamp).toLocaleTimeString([], {
@@ -115,7 +171,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
   };
 
-  const attachmentUrl = message.attachment?.url || message.attachment?.downloadUrl;
   const attachmentName = message.attachment?.fileName || message.attachment?.name || 'attachment';
   const attachmentSize = message.attachment?.fileSize || message.attachment?.size || 0;
 
@@ -202,39 +257,60 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {/* Media Attachment Rendering */}
         {message.attachment && (
           <div style={{ marginBottom: message.text ? '10px' : '0' }}>
-            {message.attachment.category === 'image' && attachmentUrl && (
+            {message.attachment.category === 'image' && (
               <div
                 style={{
                   borderRadius: '12px',
                   overflow: 'hidden',
                   cursor: 'pointer',
-                  maxHeight: '380px'
+                  maxHeight: '380px',
+                  position: 'relative',
+                  minHeight: mediaUrl ? 'auto' : '180px',
+                  background: 'rgba(0,0,0,0.2)'
                 }}
                 onClick={() => {
-                  if (onImageClick && attachmentUrl) {
-                    onImageClick(attachmentUrl, attachmentName);
+                  if (onImageClick && mediaUrl) {
+                    onImageClick(mediaUrl, attachmentName);
                   }
                 }}
               >
-                <img
-                  src={attachmentUrl}
-                  alt={attachmentName}
-                  loading="lazy"
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    maxHeight: '360px',
-                    objectFit: 'cover',
-                    borderRadius: '10px'
-                  }}
-                />
+                {mediaLoading && !mediaUrl ? (
+                  <div
+                    style={{
+                      height: '180px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      color: 'var(--text-muted)',
+                      fontSize: '13px'
+                    }}
+                  >
+                    <Loader2 size={20} className="animate-spin" />
+                    <span>Loading campus image…</span>
+                  </div>
+                ) : (
+                  <img
+                    src={mediaUrl}
+                    alt={attachmentName}
+                    loading="lazy"
+                    onError={handleMediaError}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      maxHeight: '360px',
+                      objectFit: 'cover',
+                      borderRadius: '10px'
+                    }}
+                  />
+                )}
               </div>
             )}
 
-            {message.attachment.category === 'video' && attachmentUrl && (
+            {message.attachment.category === 'video' && mediaUrl && (
               <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
                 <video
-                  src={attachmentUrl}
+                  src={mediaUrl}
                   controls
                   preload="metadata"
                   style={{ maxWidth: '100%', maxHeight: '340px', borderRadius: '10px' }}
@@ -242,7 +318,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               </div>
             )}
 
-            {message.attachment.category === 'audio' && attachmentUrl && (
+            {message.attachment.category === 'audio' && mediaUrl && (
               <div
                 style={{
                   padding: '10px 14px',
@@ -254,7 +330,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 }}
               >
                 <audio
-                  src={attachmentUrl}
+                  src={mediaUrl}
                   controls
                   style={{ height: '40px', maxWidth: '260px' }}
                 />
@@ -263,7 +339,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
             {message.attachment.category === 'pdf' && (
               <a
-                href={attachmentUrl}
+                href={mediaUrl || '#'}
                 target="_blank"
                 rel="noopener noreferrer"
                 download={attachmentName}

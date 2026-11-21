@@ -283,10 +283,16 @@ export function useMessages(
           clientTempId
         };
         if (attachment) {
+          const cleanUrl = (attachment.downloadUrl && !attachment.downloadUrl.startsWith('blob:'))
+            ? attachment.downloadUrl
+            : (attachment.url && !attachment.url.startsWith('blob:'))
+            ? attachment.url
+            : '';
+
           payload.attachment = {
             key: attachment.key,
-            url: attachment.url || attachment.downloadUrl || '',
-            downloadUrl: attachment.downloadUrl || attachment.url || '',
+            url: cleanUrl,
+            downloadUrl: cleanUrl,
             fileName: attachment.fileName || attachment.name || 'attachment',
             name: attachment.name || attachment.fileName || 'attachment',
             fileSize: attachment.fileSize || attachment.size || 0,

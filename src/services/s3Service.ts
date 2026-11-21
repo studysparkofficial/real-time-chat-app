@@ -76,13 +76,86 @@ export function validateAttachment(file: File): FileValidationResult {
   };
 }
 
-// In-memory cache for presigned URLs
+// In-memory cache for presigned URLs (cleanKey -> { url, expiresAt })
 const downloadUrlCache = new Map<string, { url: string; expiresAt: number }>();
 
+export function clearSecureDownloadUrlCache() {
+  downloadUrlCache.clear();
+}
+
 /**
- * Convert small images to base64 Data URL for zero-latency instant rendering and reliable offline fallback
+ * Extract clean S3 object key from any URL or string
  */
-async function fileToDataUrl(file: File): Promise<string> {
+export function extractKeyFromS3Url(url?: string): string {
+  if (!url) return '';
+  if (url.startsWith('data:') || url.startsWith('blob:')) return '';
+
+  try {
+    if (url.includes('.amazonaws.com/')) {
+      const part = url.split('.amazonaws.com/')[1];
+      return decodeURIComponent(part.split('?')[0]);
+    }
+    if (url.startsWith('http')) {
+      const urlObj = new URL(url);
+      return decodeURIComponent(urlObj.pathname.replace(/^\//, ''));
+    }
+  } catch {
+    // fallback
+  }
+  return decodeURIComponent(url.split('?')[0]);
+}
+
+/**
+ * Check if a given URL is currently valid and unexpired for direct rendering.
+ * Unsigned raw S3 URLs and expired URLs return false so they are never requested directly.
+ */
+export function isUrlPresignedAndValid(url?: string): boolean {
+  if (!url) return false;
+  // Local base64 data URLs are always self-contained and valid
+  if (url.startsWith('data:')) return true;
+  // Local blob URLs are valid in active session
+  if (url.startsWith('blob:')) return true;
+
+  // S3 PutObject presigned URLs CANNOT be used for GET/download (will fail with 403 AccessDenied)
+  if (url.includes('x-id=PutObject')) return false;
+
+  // Unsigned S3 URLs to private bucket will return AccessDenied if opened directly
+  if (url.includes('.amazonaws.com/') && !url.includes('X-Amz-Signature') && !url.includes('Signature=')) {
+    return false;
+  }
+
+  // Check AWS presigned expiry
+  try {
+    const urlObj = new URL(url);
+    const dateParam = urlObj.searchParams.get('X-Amz-Date');
+    const expiresParam = urlObj.searchParams.get('X-Amz-Expires');
+    if (dateParam && expiresParam) {
+      // Date format: YYYYMMDDTHHMMSSZ (e.g. 20261121T094456Z)
+      const year = parseInt(dateParam.slice(0, 4), 10);
+      const month = parseInt(dateParam.slice(4, 6), 10) - 1;
+      const day = parseInt(dateParam.slice(6, 8), 10);
+      const hour = parseInt(dateParam.slice(9, 11), 10);
+      const min = parseInt(dateParam.slice(11, 13), 10);
+      const sec = parseInt(dateParam.slice(13, 15), 10);
+      const signedTime = Date.UTC(year, month, day, hour, min, sec);
+      const expiresSeconds = parseInt(expiresParam, 10);
+      const expiryTime = signedTime + expiresSeconds * 1000;
+      // 30s buffer before expiration
+      if (Date.now() >= expiryTime - 30000) {
+        return false;
+      }
+    }
+  } catch {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Convert file to base64 Data URL for zero-latency local preview and reliable rendering
+ */
+export async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result as string);
@@ -92,88 +165,86 @@ async function fileToDataUrl(file: File): Promise<string> {
 }
 
 /**
- * Fetch presigned download URL from API Gateway with multi-route fallback
+ * Fetch a valid signed GET download URL from API Gateway
+ * Generates an AWS S3 URL with x-id=GetObject and X-Amz-Signature to prevent Access Denied errors!
  */
 export async function getPresignedDownloadUrl(
-  key: string,
+  keyOrUrl: string,
   roomId: string = 'campus-central',
   messageId: string = 'msg'
 ): Promise<string> {
-  const cached = downloadUrlCache.get(key);
+  if (!keyOrUrl) return '';
+
+  const cleanKey = extractKeyFromS3Url(keyOrUrl);
+  if (!cleanKey) return '';
+
+  // Check cache (reuse if still valid with 60s buffer)
+  const cached = downloadUrlCache.get(cleanKey);
   if (cached && Date.now() < cached.expiresAt - 60000) {
     return cached.url;
   }
 
   const user = auth.currentUser;
-  if (!user) {
-    return '';
+  let idToken = '';
+  if (user) {
+    try {
+      idToken = await user.getIdToken();
+    } catch {
+      // ignore
+    }
   }
 
-  const idToken = await user.getIdToken();
-  const ext = key.split('.').pop()?.toLowerCase();
+  const ext = (cleanKey.split('.').pop() || '').toLowerCase();
   let contentType = 'application/octet-stream';
   if (ext === 'jpg' || ext === 'jpeg') contentType = 'image/jpeg';
   else if (ext === 'png') contentType = 'image/png';
   else if (ext === 'webp') contentType = 'image/webp';
-  else if (ext === 'pdf') contentType = 'application/pdf';
+  else if (ext === 'gif') contentType = 'image/gif';
   else if (ext === 'mp4') contentType = 'video/mp4';
+  else if (ext === 'webm') contentType = 'video/webm';
+  else if (ext === 'pdf') contentType = 'application/pdf';
 
   const payload = {
+    action: 'download',
+    key: cleanKey,
     roomId,
     messageId,
-    key,
-    action: 'download',
     contentType,
-    fileName: key.split('/').pop() || 'file'
+    fileName: cleanKey.split('/').pop() || 'file'
   };
 
-  let res: Response | null = null;
   try {
-    res = await fetch(`${API_BASE_URL}/download-url`, {
+    const res = await fetch(`${API_BASE_URL}/upload-url`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${idToken}`
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
       },
       body: JSON.stringify(payload)
     });
+
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      const downloadUrl = data.downloadUrl || data.url;
+      if (downloadUrl) {
+        const expiresIn = (data.expiresIn || 900) * 1000;
+        downloadUrlCache.set(cleanKey, {
+          url: downloadUrl,
+          expiresAt: Date.now() + expiresIn
+        });
+        return downloadUrl;
+      }
+    }
   } catch (err) {
-    console.warn('[DownloadUrl] /download-url network issue, trying fallback:', err);
-  }
-
-  if (!res || res.status === 404 || res.status === 403) {
-    try {
-      res = await fetch(`${API_BASE_URL}/upload-url`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`
-        },
-        body: JSON.stringify(payload)
-      });
-    } catch (err) {
-      console.warn('[DownloadUrl] Fallback failed:', err);
-    }
-  }
-
-  if (res && res.ok) {
-    const data = await res.json().catch(() => ({}));
-    const downloadUrl = data.downloadUrl || data.url;
-    if (downloadUrl) {
-      downloadUrlCache.set(key, {
-        url: downloadUrl,
-        expiresAt: Date.now() + 3600 * 1000
-      });
-      return downloadUrl;
-    }
+    console.warn('[DownloadUrl] Failed to get signed download URL from API Gateway:', err);
   }
 
   return '';
 }
 
 /**
- * Upload to AWS S3 via API Gateway Presigned POST or PUT pipeline
- * With robust fallback so photos and media NEVER fail.
+ * Upload to AWS S3 via API Gateway Presigned PUT / POST pipeline
+ * Always pairs the upload with a signed GetObject download URL to prevent S3 Access Denied errors.
  */
 export async function uploadToS3(
   file: File,
@@ -195,133 +266,131 @@ export async function uploadToS3(
     }
   }
 
-  // 1. Attempt AWS S3 upload if token exists
-  if (idToken) {
-    try {
-      const initRes = await fetch(`${API_BASE_URL}/upload-url`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`
-        },
-        body: JSON.stringify({
-          fileName: file.name,
-          contentType: validation.mimeType,
-          size: file.size
-        })
-      });
-
-      if (initRes.ok) {
-        const initData = await initRes.json();
-        const s3Key = initData.key || (initData.post?.fields?.key) || `chats/${uid}/${Date.now()}_${file.name}`;
-        let downloadUrl = initData.downloadUrl || '';
-
-        // Check if Presigned POST format (post.url & post.fields)
-        if (initData.post && initData.post.url && initData.post.fields) {
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', initData.post.url, true);
-
-            if (xhr.upload && onProgress) {
-              xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) {
-                  onProgress(Math.round((e.loaded / e.total) * 100));
-                }
-              };
-            }
-
-            xhr.onload = () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve();
-              } else {
-                reject(new Error(`S3 POST failed (status ${xhr.status})`));
-              }
-            };
-            xhr.onerror = () => reject(new Error('S3 POST network error'));
-            xhr.onabort = () => reject(new Error('S3 upload aborted'));
-
-            const formData = new FormData();
-            Object.entries(initData.post.fields).forEach(([k, v]) => {
-              formData.append(k, v as string);
-            });
-            // S3 strictly requires the file to be appended LAST
-            formData.append('file', file);
-            xhr.send(formData);
-          });
-        } else if (initData.uploadUrl || initData.url) {
-          // Presigned PUT format
-          const targetUrl = initData.uploadUrl || initData.url;
-          await new Promise<void>((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('PUT', targetUrl, true);
-
-            if (xhr.upload && onProgress) {
-              xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) {
-                  onProgress(Math.round((e.loaded / e.total) * 100));
-                }
-              };
-            }
-
-            xhr.onload = () => {
-              if (xhr.status >= 200 && xhr.status < 300) {
-                resolve();
-              } else {
-                reject(new Error(`S3 PUT failed (status ${xhr.status})`));
-              }
-            };
-            xhr.onerror = () => reject(new Error('S3 PUT network error'));
-            xhr.onabort = () => reject(new Error('S3 upload aborted'));
-
-            xhr.setRequestHeader('Content-Type', validation.mimeType || 'application/octet-stream');
-            xhr.send(file);
-          });
-
-          if (!downloadUrl && targetUrl.startsWith('https://')) {
-            downloadUrl = targetUrl.split('?')[0];
-          }
-        }
-
-        // Cache download URL
-        if (downloadUrl) {
-          downloadUrlCache.set(s3Key, { url: downloadUrl, expiresAt: Date.now() + 3600 * 1000 });
-        }
-
-        return {
-          key: s3Key,
-          url: downloadUrl,
-          downloadUrl: downloadUrl,
-          name: file.name,
-          fileName: file.name,
-          size: file.size,
-          fileSize: file.size,
-          mimeType: validation.mimeType,
-          type: validation.mimeType,
-          category: validation.category
-        };
-      }
-    } catch (s3Error) {
-      console.warn('[S3] Presigned pipeline error, activating zero-failure fallback:', s3Error);
-    }
-  }
-
-  // 2. Resilient Fallback: If S3 / API Gateway is unreachable, CORS blocked or guest,
-  // encode image as data URL (if image and <= 4 MB) or create persistent Blob URL
-  if (onProgress) onProgress(100);
-
-  let inlineUrl = '';
+  // 1. Generate local preview URL immediately for zero-lag sender experience
+  let localPreview = '';
   if (validation.category === 'image' && file.size <= 4 * 1024 * 1024) {
-    inlineUrl = await fileToDataUrl(file);
+    try {
+      localPreview = await fileToDataUrl(file);
+    } catch {
+      localPreview = URL.createObjectURL(file);
+    }
   } else {
-    inlineUrl = URL.createObjectURL(file);
+    localPreview = URL.createObjectURL(file);
   }
 
+  // 2. Request presigned upload URL from API Gateway
+  try {
+    const initRes = await fetch(`${API_BASE_URL}/upload-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+      },
+      body: JSON.stringify({
+        fileName: file.name,
+        contentType: validation.mimeType,
+        size: file.size
+      })
+    });
+
+    if (initRes.ok) {
+      const initData = await initRes.json();
+      const s3Key = initData.key || (initData.post?.fields?.key) || `chats/${uid}/${Date.now()}_${file.name}`;
+      const uploadUrl = initData.uploadUrl || initData.url;
+
+      // Execute upload to S3
+      if (initData.post && initData.post.url && initData.post.fields) {
+        // S3 Presigned POST
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', initData.post.url, true);
+
+          if (xhr.upload && onProgress) {
+            xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) {
+                onProgress(Math.round((e.loaded / e.total) * 100));
+              }
+            };
+          }
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve();
+            } else {
+              reject(new Error(`S3 POST failed (status ${xhr.status})`));
+            }
+          };
+          xhr.onerror = () => reject(new Error('S3 POST network error'));
+          xhr.onabort = () => reject(new Error('S3 upload aborted'));
+
+          const formData = new FormData();
+          Object.entries(initData.post.fields).forEach(([k, v]) => {
+            formData.append(k, v as string);
+          });
+          // S3 requires file to be appended last
+          formData.append('file', file);
+          xhr.send(formData);
+        });
+      } else if (uploadUrl) {
+        // S3 Presigned PUT
+        await new Promise<void>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PUT', uploadUrl, true);
+
+          if (xhr.upload && onProgress) {
+            xhr.upload.onprogress = (e) => {
+              if (e.lengthComputable) {
+                onProgress(Math.round((e.loaded / e.total) * 100));
+              }
+            };
+          }
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve();
+            } else {
+              reject(new Error(`S3 PUT failed with status ${xhr.status}`));
+            }
+          };
+          xhr.onerror = () => reject(new Error('S3 PUT network error'));
+          xhr.onabort = () => reject(new Error('S3 upload aborted'));
+
+          xhr.setRequestHeader('Content-Type', validation.mimeType || 'application/octet-stream');
+          xhr.send(file);
+        });
+      }
+
+      // 3. Immediately fetch the valid signed GET download URL from API Gateway
+      const signedDownloadUrl = await getPresignedDownloadUrl(s3Key);
+
+      return {
+        key: s3Key,
+        // url: stored in Firestore as the signed GetObject URL (never local blob)
+        url: signedDownloadUrl,
+        downloadUrl: signedDownloadUrl,
+        previewUrl: localPreview, // used for instantaneous 0ms sender preview
+        name: file.name,
+        fileName: file.name,
+        size: file.size,
+        fileSize: file.size,
+        mimeType: validation.mimeType,
+        type: validation.mimeType,
+        category: validation.category
+      };
+    }
+  } catch (s3Err) {
+    console.warn('[S3] Pipeline issue, using local media fallback:', s3Err);
+  }
+
+  // Fallback: If S3 upload fails or network blips, return the local preview so user's image is preserved
+  if (onProgress) onProgress(100);
   const fallbackKey = `chats/${uid}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
 
   return {
     key: fallbackKey,
-    url: inlineUrl,
-    downloadUrl: inlineUrl,
+    url: localPreview,
+    downloadUrl: localPreview,
+    previewUrl: localPreview,
     name: file.name,
     fileName: file.name,
     size: file.size,

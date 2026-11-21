@@ -19,6 +19,7 @@ export interface MessageAttachment {
   key: string;
   url?: string;
   downloadUrl?: string;
+  previewUrl?: string;
   name?: string;
   fileName?: string;
   size?: number;
