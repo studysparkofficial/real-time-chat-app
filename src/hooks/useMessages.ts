@@ -138,6 +138,23 @@ export function useMessages(
           const isPending = docMetadata.hasPendingWrites;
           const status: ChatMessage['status'] = isPending ? 'sent' : 'delivered';
 
+          const rawAttachment = data.attachment;
+          let normalizedAttachment: MessageAttachment | null = null;
+          if (rawAttachment) {
+            normalizedAttachment = {
+              key: rawAttachment.key || '',
+              url: rawAttachment.url || rawAttachment.downloadUrl || '',
+              downloadUrl: rawAttachment.downloadUrl || rawAttachment.url || '',
+              fileName: rawAttachment.fileName || rawAttachment.name || 'attachment',
+              name: rawAttachment.name || rawAttachment.fileName || 'attachment',
+              fileSize: rawAttachment.fileSize || rawAttachment.size || 0,
+              size: rawAttachment.size || rawAttachment.fileSize || 0,
+              mimeType: rawAttachment.mimeType || rawAttachment.type || 'application/octet-stream',
+              type: rawAttachment.type || rawAttachment.mimeType || 'application/octet-stream',
+              category: rawAttachment.category || 'file'
+            };
+          }
+
           const msg: ChatMessage = {
             id: docSnap.id,
             roomId,
@@ -145,7 +162,7 @@ export function useMessages(
             sender: data.sender || { uid: 'unknown', displayName: 'Anonymous' },
             timestamp: ts,
             status,
-            attachment: data.attachment || null,
+            attachment: normalizedAttachment,
             reactions: data.reactions || {},
             replyTo: data.replyTo || null,
             clientTempId: data.clientTempId
@@ -265,7 +282,20 @@ export function useMessages(
           reactions: {},
           clientTempId
         };
-        if (attachment) payload.attachment = attachment;
+        if (attachment) {
+          payload.attachment = {
+            key: attachment.key,
+            url: attachment.url || attachment.downloadUrl || '',
+            downloadUrl: attachment.downloadUrl || attachment.url || '',
+            fileName: attachment.fileName || attachment.name || 'attachment',
+            name: attachment.name || attachment.fileName || 'attachment',
+            fileSize: attachment.fileSize || attachment.size || 0,
+            size: attachment.size || attachment.fileSize || 0,
+            mimeType: attachment.mimeType || attachment.type || 'application/octet-stream',
+            type: attachment.type || attachment.mimeType || 'application/octet-stream',
+            category: attachment.category || 'file'
+          };
+        }
         if (replyTo) payload.replyTo = replyTo;
 
         await addDoc(colRef, payload);

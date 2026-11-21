@@ -18,9 +18,9 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
     return (
       <div
         style={{
-          padding: '12px 16px',
+          padding: '14px 16px',
           borderTop: '1px solid var(--border-color)',
-          background: 'rgba(0, 0, 0, 0.1)'
+          background: 'rgba(0, 0, 0, 0.15)'
         }}
       >
         <button
@@ -30,19 +30,20 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '8px',
-            padding: '10px 14px',
+            gap: '10px',
+            padding: '12px 16px',
             background: 'var(--accent-gradient)',
             color: '#fff',
             border: 'none',
-            borderRadius: '10px',
+            borderRadius: '12px',
             cursor: 'pointer',
-            fontWeight: 600,
-            fontSize: '14px',
-            minHeight: '44px'
+            fontWeight: 700,
+            fontSize: '15px',
+            minHeight: '48px',
+            boxShadow: 'var(--shadow-sm)'
           }}
         >
-          <LogIn size={18} /> Sign In to PulseChat
+          <LogIn size={20} /> Sign In to JNUverse
         </button>
       </div>
     );
@@ -51,12 +52,12 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
   return (
     <div
       style={{
-        padding: '10px 14px',
+        padding: '12px 16px',
         borderTop: '1px solid var(--border-color)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        background: 'rgba(0, 0, 0, 0.1)'
+        background: 'rgba(0, 0, 0, 0.15)'
       }}
     >
       <div
@@ -64,29 +65,29 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '10px',
+          gap: '12px',
           cursor: 'pointer',
           flex: 1,
           minWidth: 0,
           padding: '4px 6px',
-          borderRadius: '8px',
+          borderRadius: '10px',
           transition: 'background 0.15s ease'
         }}
         onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-card-hover)')}
         onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-        title="View Profile & Settings"
+        title="Scholar Profile & Settings"
       >
         <Avatar
           src={user.photoURL}
           name={user.displayName}
           status={user.status}
-          size="sm"
+          size="md"
         />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div
             style={{
-              fontSize: '13.5px',
-              fontWeight: 600,
+              fontSize: '14.5px',
+              fontWeight: 700,
               color: 'var(--text-primary)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -97,14 +98,14 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
           </div>
           <div
             style={{
-              fontSize: '11.5px',
+              fontSize: '12px',
               color: 'var(--text-muted)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis'
             }}
           >
-            {user.bio || `@${user.uid.slice(0, 6)}`}
+            {user.bio || 'JNU Scholar'}
           </div>
         </div>
       </div>
@@ -116,12 +117,12 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
           border: 'none',
           color: 'var(--text-secondary)',
           cursor: 'pointer',
-          minWidth: '40px',
-          minHeight: '40px',
+          minWidth: '44px',
+          minHeight: '44px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: '8px',
+          borderRadius: '10px',
           transition: 'all 0.15s ease'
         }}
         onMouseEnter={(e) => {
@@ -134,7 +135,7 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
         }}
         title="Settings"
       >
-        <Settings size={18} />
+        <Settings size={20} />
       </button>
     </div>
   );

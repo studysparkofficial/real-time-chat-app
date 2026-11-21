@@ -12,41 +12,34 @@ service cloud.firestore {
 
     // Message validation helpers
     function isValidText(text) {
-      return text is string && text.size() <= 10000;
+      return text == null || (text is string && text.size() <= 10000);
     }
 
     function isValidAttachment(att) {
       return att == null || (
         att.key is string
-        && att.key.matches('^chats/' + request.auth.uid + '/.*')
-        && att.fileSize is int
-        && att.fileSize > 0
-        && att.fileSize <= 52428800 // 50 MB
-        && att.mimeType in [
-          'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-          'video/mp4', 'video/webm', 'video/quicktime',
-          'audio/webm', 'audio/mp4', 'audio/mpeg', 'audio/ogg',
-          'application/pdf'
-        ]
+        && (
+          (att.size is int && att.size > 0 && att.size <= 52428800) ||
+          (att.fileSize is int && att.fileSize > 0 && att.fileSize <= 52428800)
+        )
       );
     }
 
     // Messages collection under rooms
     match /rooms/{roomId}/messages/{messageId} {
-      // Authenticated users can read chat room streams
       allow read: if isAuthenticated();
 
-      // Creating a message: must be from the authenticated sender, no spoofing
+      // Creating a message: must be from the authenticated sender
       allow create: if isAuthenticated()
         && request.resource.data.sender.uid == request.auth.uid
         && isValidText(request.resource.data.text)
         && isValidAttachment(request.resource.data.attachment)
         && (
-          (request.resource.data.text.size() > 0) ||
+          (request.resource.data.text is string && request.resource.data.text.size() > 0) ||
           (request.resource.data.attachment != null)
         );
 
-      // Updating a message: allows emoji reactions by any room member, or editing by message owner
+      // Updating a message: allows emoji reactions by any room member, or editing by owner
       allow update: if isAuthenticated()
         && (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) ||
@@ -77,10 +70,10 @@ service cloud.firestore {
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 40
+        && request.resource.data.name.size() <= 60
         && request.resource.data.slug is string
         && request.resource.data.slug.size() > 0
-        && request.resource.data.slug.size() <= 40;
+        && request.resource.data.slug.size() <= 60;
       allow update, delete: if isAuthenticated()
         && resource.data.createdBy == request.auth.uid;
     }

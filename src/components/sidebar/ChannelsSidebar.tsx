@@ -1,5 +1,5 @@
 import React from 'react';
-import { Plus, MessageSquare, Radio } from 'lucide-react';
+import { Plus, MessageSquare, X } from 'lucide-react';
 import { ChatRoom, ChatUser } from '../../types/chat.types';
 import { ChannelItem } from './ChannelItem';
 import { UserProfileBar } from './UserProfileBar';
@@ -14,7 +14,8 @@ interface ChannelsSidebarProps {
   onOpenAccountModal: () => void;
   onOpenAuthModal: () => void;
   isOpenMobile: boolean;
-  onCloseMobile: () => void;
+  isDesktopOpen: boolean;
+  onCloseSidebar: () => void;
 }
 
 export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
@@ -27,18 +28,23 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
   onOpenAccountModal,
   onOpenAuthModal,
   isOpenMobile,
-  onCloseMobile
+  isDesktopOpen,
+  onCloseSidebar
 }) => {
   const handleSelect = (roomId: string) => {
     onSelectRoom(roomId);
     if (isOpenMobile) {
-      onCloseMobile();
+      onCloseSidebar();
     }
   };
 
   return (
-    <aside className={`sidebar-container ${isOpenMobile ? 'open' : ''}`}>
-      {/* Brand Header */}
+    <aside
+      className={`sidebar-container ${isOpenMobile ? 'open' : ''} ${
+        !isDesktopOpen ? 'desktop-closed' : ''
+      }`}
+    >
+      {/* Brand Header with JNU Seal */}
       <div
         style={{
           height: 'var(--header-height)',
@@ -46,69 +52,101 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0 16px',
-          borderBottom: '1px solid var(--border-color)'
+          borderBottom: '1px solid var(--border-color)',
+          background: 'rgba(13, 21, 39, 0.95)'
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <img
+            src="/jnu-logo.png"
+            alt="JNU Seal"
             style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '9px',
-              background: 'var(--accent-gradient)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#fff',
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              objectFit: 'cover',
+              border: '2px solid var(--accent-gold, #f59e0b)',
               boxShadow: 'var(--shadow-sm)'
             }}
-          >
-            <Radio size={18} />
-          </div>
+          />
           <div>
-            <span
+            <div
               style={{
-                fontWeight: 700,
-                fontSize: '16px',
-                letterSpacing: '-0.3px',
-                color: 'var(--text-primary)'
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
               }}
             >
-              PulseChat
-            </span>
-            <span
-              style={{
-                display: 'inline-block',
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: '#10b981',
-                marginLeft: '6px',
-                boxShadow: '0 0 8px #10b981'
-              }}
-            />
+              <span
+                style={{
+                  fontWeight: 800,
+                  fontSize: '18px',
+                  letterSpacing: '-0.3px',
+                  color: 'var(--text-primary)'
+                }}
+              >
+                JNUverse
+              </span>
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  background: '#10b981',
+                  boxShadow: '0 0 8px #10b981'
+                }}
+              />
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--accent-gold)', fontWeight: 600 }}>
+              JNU CAMPUS HUB
+            </div>
           </div>
         </div>
 
-        <button
-          onClick={onOpenCreateChannel}
-          title="Create Channel"
-          style={{
-            minWidth: '36px',
-            minHeight: '36px',
-            borderRadius: '8px',
-            background: 'var(--bg-card-hover)',
-            border: '1px solid var(--border-color)',
-            color: 'var(--text-primary)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.15s ease'
-          }}
-        >
-          <Plus size={18} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* New Channel Button */}
+          <button
+            onClick={onOpenCreateChannel}
+            title="Create JNU Channel"
+            style={{
+              minWidth: '40px',
+              minHeight: '40px',
+              borderRadius: '10px',
+              background: 'var(--bg-card-hover)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <Plus size={20} />
+          </button>
+
+          {/* Dedicated Close Button (X) to close sidebar on all screen sizes */}
+          <button
+            onClick={onCloseSidebar}
+            title="Close Channels Menu"
+            style={{
+              minWidth: '40px',
+              minHeight: '40px',
+              borderRadius: '10px',
+              background: 'var(--bg-card-hover)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            <X size={20} />
+          </button>
+        </div>
       </div>
 
       {/* Channels Section */}
@@ -119,24 +157,24 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
           padding: '12px 10px',
           display: 'flex',
           flexDirection: 'column',
-          gap: '4px'
+          gap: '6px'
         }}
       >
         <div
           style={{
-            fontSize: '11px',
+            fontSize: '12px',
             fontWeight: 700,
             color: 'var(--text-muted)',
             textTransform: 'uppercase',
             letterSpacing: '0.6px',
-            padding: '4px 10px 8px 10px',
+            padding: '6px 12px 8px 12px',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px'
+            gap: '8px'
           }}
         >
-          <MessageSquare size={13} />
-          <span>Channels</span>
+          <MessageSquare size={15} />
+          <span>CAMPUS CHANNELS</span>
         </div>
 
         {rooms.map((room) => (

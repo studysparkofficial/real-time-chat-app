@@ -8,6 +8,8 @@ export interface ChatUser {
   isAnonymous?: boolean;
   status: UserPresenceStatus;
   bio?: string;
+  hostel?: string; // JNU Hostel (Ganga, Yamuna, Jhelum, Sutlej, etc.)
+  centre?: string; // School/Centre (SIS, SL, SSS, SPS, etc.)
   lastSeen?: number;
 }
 
@@ -17,11 +19,14 @@ export interface MessageAttachment {
   key: string;
   url?: string;
   downloadUrl?: string;
-  fileName: string;
-  fileSize: number;
-  mimeType: string;
+  name?: string;
+  fileName?: string;
+  size?: number;
+  fileSize?: number;
+  mimeType?: string;
+  type?: string;
   category: 'image' | 'video' | 'pdf' | 'audio' | 'file';
-  duration?: number; // For audio voice notes
+  duration?: number;
   blurhash?: string;
 }
 

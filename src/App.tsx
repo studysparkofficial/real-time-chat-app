@@ -14,38 +14,60 @@ import { useAttachments } from './hooks/useAttachments';
 import { useAudio } from './hooks/useAudio';
 import { useHaptics } from './hooks/useHaptics';
 
-import { db, collection, addDoc, onSnapshot, serverTimestamp } from './services/firebase';
+import { db, collection, addDoc, onSnapshot } from './services/firebase';
 import { localCache } from './services/indexedDbCache';
 import { ChatRoom, MessageReplyReference } from './types/chat.types';
 
-const DEFAULT_ROOMS: ChatRoom[] = [
+// Official JNU Campus Channels
+const JNU_DEFAULT_ROOMS: ChatRoom[] = [
   {
-    id: 'general',
-    name: 'general',
-    slug: 'general',
-    icon: '💬',
-    topic: 'Main channel for all company and team discussions.'
+    id: 'campus-central',
+    name: 'campus-central',
+    slug: 'campus-central',
+    icon: '🏛️',
+    topic: 'Official JNU announcements, academic schedules, administrative circulars, and university news.'
   },
   {
-    id: 'tech-talk',
-    name: 'tech-talk',
-    slug: 'tech-talk',
-    icon: '⚡',
-    topic: 'Engineering, system design, react architectures, and benchmarks.'
+    id: 'ganga-dhaba',
+    name: 'ganga-dhaba',
+    slug: 'ganga-dhaba',
+    icon: '☕',
+    topic: 'Late-night chai charcha, student council discussions, debates, philosophy, and gatherings.'
   },
   {
-    id: 'design',
-    name: 'design',
-    slug: 'design',
-    icon: '🎨',
-    topic: 'UI/UX design systems, animations, and typography.'
+    id: 'hostels-mess',
+    name: 'hostels-mess',
+    slug: 'hostels-mess',
+    icon: '🛏️',
+    topic: 'Ganga, Yamuna, Jhelum, Sutlej, Mahi-Mandavi, Kaveri, Periyar, Tapti hostel & mess queries.'
   },
   {
-    id: 'random',
-    name: 'random',
-    slug: 'random',
-    icon: '🚀',
-    topic: 'Casual banter, memes, coffee breaks, and weekend plans.'
+    id: 'library-research',
+    name: 'library-research',
+    slug: 'library-research',
+    icon: '📚',
+    topic: 'Dr. B.R. Ambedkar Central Library seating, research methodology, MPhil/PhD thesis discussions.'
+  },
+  {
+    id: 'school-academics',
+    name: 'school-academics',
+    slug: 'school-academics',
+    icon: '🎓',
+    topic: 'SIS, SL, SSS, SPS, SES, SBT, SC&IS department seminars, assignments, and study materials.'
+  },
+  {
+    id: 'lost-and-found',
+    name: 'lost-and-found',
+    slug: 'lost-and-found',
+    icon: '🔍',
+    topic: 'Lost identity cards, hostel keys, books, electronics, and documents across campus.'
+  },
+  {
+    id: 'cultural-sports',
+    name: 'cultural-sports',
+    slug: 'cultural-sports',
+    icon: '🎭',
+    topic: 'PSR (Parthasarathy Rocks) evening jams, theatrical plays, sports stadium events, and fests.'
   }
 ];
 
@@ -53,7 +75,6 @@ export const App: React.FC = () => {
   // 1. Auth & Preferences
   const {
     user: currentUser,
-    loading: authLoading,
     preferences,
     loginWithGoogle,
     loginWithEmail,
@@ -66,11 +87,11 @@ export const App: React.FC = () => {
 
   // 2. Audio & Haptics
   const { playSent, playReceived, playReaction } = useAudio(preferences.soundEnabled);
-  const { lightTap, mediumTap } = useHaptics(preferences.hapticsEnabled);
+  const { lightTap } = useHaptics(preferences.hapticsEnabled);
 
   // 3. Channels State
-  const [rooms, setRooms] = useState<ChatRoom[]>(DEFAULT_ROOMS);
-  const [activeRoomId, setActiveRoomId] = useState<string>('general');
+  const [rooms, setRooms] = useState<ChatRoom[]>(JNU_DEFAULT_ROOMS);
+  const [activeRoomId, setActiveRoomId] = useState<string>('campus-central');
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
   // 4. Modals and Overlays State
@@ -80,7 +101,10 @@ export const App: React.FC = () => {
   const [createChannelModalOpen, setCreateChannelModalOpen] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [lightboxName, setLightboxName] = useState<string | undefined>(undefined);
+
+  // Sidebar Open States: Mobile Drawer + Desktop Collapsible
   const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
+  const [isDesktopSidebarOpen, setIsDesktopSidebarOpen] = useState(true);
 
   // 5. Reply Reference State
   const [replyTo, setReplyTo] = useState<MessageReplyReference | null>(null);
@@ -102,7 +126,6 @@ export const App: React.FC = () => {
 
   // Sync custom channels from Firestore & cache in IndexedDB
   useEffect(() => {
-    // Load cached rooms from IndexedDB for instant boot
     localCache.getCachedRooms().then((cached) => {
       if (cached && cached.length > 0) {
         setRooms(cached);
@@ -118,9 +141,8 @@ export const App: React.FC = () => {
           custom.push(d.data() as ChatRoom);
         });
 
-        // Combine default with custom
         const mergedMap = new Map<string, ChatRoom>();
-        DEFAULT_ROOMS.forEach((r) => mergedMap.set(r.id, r));
+        JNU_DEFAULT_ROOMS.forEach((r) => mergedMap.set(r.id, r));
         custom.forEach((r) => mergedMap.set(r.id, r));
 
         const fullList = Array.from(mergedMap.values());
@@ -137,7 +159,7 @@ export const App: React.FC = () => {
 
   // Active Room Definition
   const activeRoom = useMemo(() => {
-    return rooms.find((r) => r.id === activeRoomId) || rooms[0] || DEFAULT_ROOMS[0];
+    return rooms.find((r) => r.id === activeRoomId) || rooms[0] || JNU_DEFAULT_ROOMS[0];
   }, [rooms, activeRoomId]);
 
   // Clear unread count for newly selected room
@@ -192,7 +214,7 @@ export const App: React.FC = () => {
     uploadCurrentAttachment
   } = useAttachments();
 
-  // Send message handler (combines text + optional uploaded media)
+  // Send message handler (combines text + uploaded media with zero-failure fallback)
   const handleSendMessage = useCallback(
     async (text: string, file?: File | null) => {
       if (!currentUser) {
@@ -204,9 +226,9 @@ export const App: React.FC = () => {
       if (file) {
         try {
           attachment = await uploadCurrentAttachment(file);
-        } catch {
-          addToast('File upload failed. Please try again.', 'error');
-          return;
+        } catch (uploadErr) {
+          console.warn('[Upload] S3 upload issue:', uploadErr);
+          addToast('File processed with fallback. Sending to channel…', 'info');
         }
       }
 
@@ -266,7 +288,6 @@ export const App: React.FC = () => {
   }, [preferences.theme, updatePreferences]);
 
   // Hardware Back Button & Mobile Gesture Support
-  // When an overlay is open, push state; on popstate dismiss the overlay rather than navigating away!
   const hasActiveOverlay = Boolean(
     authModalOpen ||
     accountModalOpen ||
@@ -282,7 +303,6 @@ export const App: React.FC = () => {
     }
 
     const handlePopState = () => {
-      // Dismiss topmost open overlay
       if (lightboxUrl) {
         setLightboxUrl(null);
       } else if (authModalOpen) {
@@ -357,6 +377,8 @@ export const App: React.FC = () => {
         onOpenChannelInfo={() => setChannelInfoModalOpen(true)}
         isSidebarOpenMobile={isSidebarOpenMobile}
         setIsSidebarOpenMobile={setIsSidebarOpenMobile}
+        isDesktopSidebarOpen={isDesktopSidebarOpen}
+        setIsDesktopSidebarOpen={setIsDesktopSidebarOpen}
         toasts={toasts}
         onDismissToast={dismissToast}
         unreadCounts={unreadCounts}

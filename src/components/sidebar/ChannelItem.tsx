@@ -26,36 +26,37 @@ export const ChannelItem: React.FC<ChannelItemProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '10px 14px',
-        borderRadius: '10px',
-        border: 'none',
+        padding: '12px 14px',
+        borderRadius: '12px',
+        border: isActive ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid transparent',
         background: isActive ? 'var(--bg-card-hover, rgba(55,65,81,0.6))' : 'transparent',
         color: isActive ? 'var(--text-primary, #f8fafc)' : 'var(--text-secondary, #94a3b8)',
-        fontWeight: isActive ? 600 : 400,
-        fontSize: '14.5px',
+        fontWeight: isActive ? 700 : 500,
+        fontSize: '15.5px',
         cursor: 'pointer',
         textAlign: 'left',
-        minHeight: '44px', // Android touch target minimum
+        minHeight: '50px', // Android touch target
         transition: 'all 0.15s ease',
         userSelect: 'none'
       }}
       onMouseEnter={(e) => {
-        if (!isActive) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
+        if (!isActive) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
       }}
       onMouseLeave={(e) => {
         if (!isActive) e.currentTarget.style.background = 'transparent';
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
         <span
           style={{
-            fontSize: isEmojiIcon ? '16px' : '14px',
+            fontSize: isEmojiIcon ? '20px' : '18px',
             color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
             display: 'flex',
-            alignItems: 'center'
+            alignItems: 'center',
+            flexShrink: 0
           }}
         >
-          {isEmojiIcon ? room.icon : <Hash size={17} />}
+          {isEmojiIcon ? room.icon : <Hash size={19} />}
         </span>
         <span
           style={{
@@ -71,13 +72,13 @@ export const ChannelItem: React.FC<ChannelItemProps> = ({
       {unreadCount > 0 && (
         <span
           style={{
-            background: 'var(--accent-primary, #3b82f6)',
+            background: 'var(--accent-primary, #2563eb)',
             color: '#fff',
-            fontSize: '11px',
-            fontWeight: 700,
-            padding: '2px 7px',
+            fontSize: '12px',
+            fontWeight: 800,
+            padding: '3px 8px',
             borderRadius: '999px',
-            minWidth: '20px',
+            minWidth: '22px',
             textAlign: 'center'
           }}
         >

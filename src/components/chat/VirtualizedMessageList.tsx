@@ -34,7 +34,7 @@ export const VirtualizedMessageList: React.FC<VirtualizedMessageListProps> = ({
   const rowVirtualizer = useVirtualizer({
     count: messages.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 78,
+    estimateSize: () => 86,
     overscan: 6
   });
 

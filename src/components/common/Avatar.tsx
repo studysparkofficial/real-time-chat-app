@@ -11,24 +11,24 @@ interface AvatarProps {
 }
 
 const SIZE_MAP = {
-  xs: 24,
-  sm: 32,
-  md: 40,
-  lg: 48,
-  xl: 56,
-  showcase: 72
+  xs: 26,
+  sm: 36,
+  md: 44,
+  lg: 52,
+  xl: 60,
+  showcase: 80
 };
 
 const STATUS_COLOR_MAP: Record<UserPresenceStatus, string> = {
   online: 'var(--status-online, #10b981)',
   away: 'var(--status-away, #f59e0b)',
   busy: 'var(--status-busy, #ef4444)',
-  offline: 'var(--status-offline, #6b7280)'
+  offline: 'var(--status-offline, #64748b)'
 };
 
 export const Avatar: React.FC<AvatarProps> = ({
   src,
-  name = 'User',
+  name = 'Scholar',
   size = 'md',
   status,
   showStatusRing = false,
@@ -38,7 +38,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   const isEmoji = src && src.length <= 4 && !src.startsWith('http') && !src.startsWith('data:');
   const initial = name ? name.charAt(0).toUpperCase() : '?';
 
-  const dotSize = Math.max(8, Math.round(pixelSize * 0.28));
+  const dotSize = Math.max(9, Math.round(pixelSize * 0.28));
   const statusColor = status ? STATUS_COLOR_MAP[status] : undefined;
 
   return (
@@ -65,11 +65,12 @@ export const Avatar: React.FC<AvatarProps> = ({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: 'linear-gradient(135deg, #1e293b 0%, #334155 100%)',
+          background: 'linear-gradient(135deg, #132036 0%, #1e3a8a 100%)',
           color: '#f8fafc',
-          fontWeight: 600,
+          fontWeight: 700,
           fontSize: `${Math.round(pixelSize * 0.44)}px`,
-          userSelect: 'none'
+          userSelect: 'none',
+          border: '1.5px solid rgba(255, 255, 255, 0.1)'
         }}
       >
         {src && !isEmoji && (src.startsWith('http') || src.startsWith('data:') || src.startsWith('blob:')) ? (
@@ -78,7 +79,6 @@ export const Avatar: React.FC<AvatarProps> = ({
             alt={name}
             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             onError={(e) => {
-              // Fallback to initial
               (e.target as HTMLElement).style.display = 'none';
             }}
           />
@@ -100,7 +100,7 @@ export const Avatar: React.FC<AvatarProps> = ({
             height: `${dotSize}px`,
             borderRadius: '50%',
             backgroundColor: statusColor,
-            border: '2px solid var(--bg-secondary, #111827)',
+            border: '2px solid var(--bg-secondary, #0d1527)',
             boxSizing: 'content-box'
           }}
         />

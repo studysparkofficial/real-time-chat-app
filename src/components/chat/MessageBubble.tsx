@@ -9,8 +9,7 @@ import {
   Smile,
   Trash2,
   FileText,
-  Download,
-  Play
+  Download
 } from 'lucide-react';
 import { ChatMessage, ChatUser } from '../../types/chat.types';
 import { Avatar } from '../common/Avatar';
@@ -29,9 +28,8 @@ interface MessageBubbleProps {
   onCopySuccess?: (text: string) => void;
 }
 
-const QUICK_REACTIONS = ['👍', '❤️', '🔥', '😂', '🎉', '🚀'];
+const QUICK_REACTIONS = ['👍', '❤️', '🔥', '😂', '🎉', '🚀', '🎓', '☕'];
 
-// Deterministic color generation for incoming sender names
 function getSenderColor(name: string): string {
   const colors = [
     '#38bdf8', '#818cf8', '#c084fc', '#f472b6',
@@ -59,7 +57,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [showReactionPicker, setShowReactionPicker] = useState(false);
 
   const isOutgoing = currentUser ? message.sender.uid === currentUser.uid : false;
-  const senderColor = getSenderColor(message.sender.displayName || 'User');
+  const senderColor = getSenderColor(message.sender.displayName || 'Scholar');
 
   // Format time (e.g. 10:45 AM)
   const timeString = new Date(message.timestamp).toLocaleTimeString([], {
@@ -73,29 +71,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
     if (message.status === 'sending') {
       return (
-        <span title="Sending…" className="status-tick">
-          <Clock size={13} />
+        <span title="Sending to JNUverse…" className="status-tick">
+          <Clock size={14} />
         </span>
       );
     }
     if (message.status === 'sent') {
       return (
         <span title="Sent to Cloud" className="status-tick">
-          <Check size={14} />
+          <Check size={15} />
         </span>
       );
     }
     if (message.status === 'delivered') {
       return (
         <span title="Delivered & Synced" className="status-tick delivered">
-          <CheckCheck size={14} />
+          <CheckCheck size={16} />
         </span>
       );
     }
     if (message.status === 'failed') {
       return (
         <span title={message.errorMessage || 'Failed'} className="status-tick">
-          <AlertCircle size={14} color="#ef4444" />
+          <AlertCircle size={15} color="#ef4444" />
         </span>
       );
     }
@@ -103,7 +101,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   };
 
   const handleBubbleClick = (e: React.MouseEvent) => {
-    // Check if clicked button was code-copy
     const target = e.target as HTMLElement;
     if (target.classList.contains('markdown-code-copy-btn')) {
       const code = target.getAttribute('data-code');
@@ -118,6 +115,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
   };
 
+  const attachmentUrl = message.attachment?.url || message.attachment?.downloadUrl;
+  const attachmentName = message.attachment?.fileName || message.attachment?.name || 'attachment';
+  const attachmentSize = message.attachment?.fileSize || message.attachment?.size || 0;
+
   return (
     <div
       id={`msg-${message.id}`}
@@ -129,7 +130,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       }}
       style={{ position: 'relative' }}
     >
-      {/* Incoming avatar (hidden for outgoing messages) */}
+      {/* Incoming avatar with status indicator */}
       {!isOutgoing && (
         <Avatar
           src={message.sender.photoURL}
@@ -152,22 +153,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               if (onScrollToReply) onScrollToReply(message.replyTo!.id);
             }}
             style={{
-              padding: '6px 10px',
-              marginBottom: '6px',
-              borderRadius: '8px',
-              background: isOutgoing ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.06)',
-              borderLeft: '3px solid var(--accent-primary)',
+              padding: '6px 12px',
+              marginBottom: '8px',
+              borderRadius: '10px',
+              background: isOutgoing ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.07)',
+              borderLeft: '4px solid var(--accent-gold, #f59e0b)',
               cursor: 'pointer',
-              fontSize: '12px',
+              fontSize: '13px',
               userSelect: 'none'
             }}
           >
-            <div style={{ fontWeight: 600, color: 'var(--accent-primary)', marginBottom: '2px' }}>
+            <div style={{ fontWeight: 700, color: 'var(--accent-gold, #f59e0b)', marginBottom: '2px' }}>
               {message.replyTo.senderName}
             </div>
             <div
               style={{
-                color: isOutgoing ? 'rgba(255,255,255,0.8)' : 'var(--text-secondary)',
+                color: isOutgoing ? 'rgba(255,255,255,0.85)' : 'var(--text-secondary)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis'
@@ -185,14 +186,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             {message.sender.isAnonymous && (
               <span
                 style={{
-                  fontSize: '10px',
-                  padding: '1px 5px',
-                  borderRadius: '4px',
-                  background: 'rgba(255,255,255,0.1)',
+                  fontSize: '10.5px',
+                  padding: '2px 6px',
+                  borderRadius: '6px',
+                  background: 'rgba(255,255,255,0.12)',
                   color: 'var(--text-muted)'
                 }}
               >
-                Guest
+                Guest Scholar
               </span>
             )}
           </div>
@@ -200,90 +201,87 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         {/* Media Attachment Rendering */}
         {message.attachment && (
-          <div style={{ marginBottom: message.text ? '8px' : '0' }}>
-            {message.attachment.category === 'image' && (
+          <div style={{ marginBottom: message.text ? '10px' : '0' }}>
+            {message.attachment.category === 'image' && attachmentUrl && (
               <div
                 style={{
-                  borderRadius: '10px',
+                  borderRadius: '12px',
                   overflow: 'hidden',
                   cursor: 'pointer',
-                  maxHeight: '340px'
+                  maxHeight: '380px'
                 }}
                 onClick={() => {
-                  if (onImageClick && (message.attachment?.url || message.attachment?.downloadUrl)) {
-                    onImageClick(
-                      message.attachment.url || message.attachment.downloadUrl!,
-                      message.attachment.fileName
-                    );
+                  if (onImageClick && attachmentUrl) {
+                    onImageClick(attachmentUrl, attachmentName);
                   }
                 }}
               >
                 <img
-                  src={message.attachment.url || message.attachment.downloadUrl}
-                  alt={message.attachment.fileName}
+                  src={attachmentUrl}
+                  alt={attachmentName}
                   loading="lazy"
                   style={{
                     display: 'block',
                     width: '100%',
-                    maxHeight: '320px',
+                    maxHeight: '360px',
                     objectFit: 'cover',
-                    borderRadius: '8px'
+                    borderRadius: '10px'
                   }}
                 />
               </div>
             )}
 
-            {message.attachment.category === 'video' && (
-              <div style={{ borderRadius: '10px', overflow: 'hidden' }}>
+            {message.attachment.category === 'video' && attachmentUrl && (
+              <div style={{ borderRadius: '12px', overflow: 'hidden' }}>
                 <video
-                  src={message.attachment.url || message.attachment.downloadUrl}
+                  src={attachmentUrl}
                   controls
                   preload="metadata"
-                  style={{ maxWidth: '100%', maxHeight: '300px', borderRadius: '8px' }}
+                  style={{ maxWidth: '100%', maxHeight: '340px', borderRadius: '10px' }}
                 />
               </div>
             )}
 
-            {message.attachment.category === 'audio' && (
+            {message.attachment.category === 'audio' && attachmentUrl && (
               <div
                 style={{
-                  padding: '8px 12px',
-                  borderRadius: '10px',
-                  background: 'rgba(0,0,0,0.25)',
+                  padding: '10px 14px',
+                  borderRadius: '12px',
+                  background: 'rgba(0,0,0,0.3)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '10px'
+                  gap: '12px'
                 }}
               >
                 <audio
-                  src={message.attachment.url || message.attachment.downloadUrl}
+                  src={attachmentUrl}
                   controls
-                  style={{ height: '36px', maxWidth: '240px' }}
+                  style={{ height: '40px', maxWidth: '260px' }}
                 />
               </div>
             )}
 
             {message.attachment.category === 'pdf' && (
               <a
-                href={message.attachment.url || message.attachment.downloadUrl}
+                href={attachmentUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                download={message.attachment.fileName}
+                download={attachmentName}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '10px',
-                  padding: '10px 12px',
-                  borderRadius: '10px',
-                  background: 'rgba(0,0,0,0.2)',
+                  gap: '12px',
+                  padding: '12px 14px',
+                  borderRadius: '12px',
+                  background: 'rgba(0,0,0,0.25)',
                   textDecoration: 'none',
                   color: 'inherit'
                 }}
               >
                 <div
                   style={{
-                    padding: '8px',
-                    borderRadius: '8px',
+                    padding: '10px',
+                    borderRadius: '10px',
                     background: '#ef4444',
                     color: '#fff',
                     display: 'flex',
@@ -291,25 +289,25 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     justifyContent: 'center'
                   }}
                 >
-                  <FileText size={20} />
+                  <FileText size={22} />
                 </div>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div
                     style={{
-                      fontSize: '13px',
-                      fontWeight: 600,
+                      fontSize: '14px',
+                      fontWeight: 700,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap'
                     }}
                   >
-                    {message.attachment.fileName}
+                    {attachmentName}
                   </div>
-                  <div style={{ fontSize: '11px', opacity: 0.75 }}>
-                    {formatBytes(message.attachment.fileSize)}
+                  <div style={{ fontSize: '12px', opacity: 0.8 }}>
+                    {formatBytes(attachmentSize)}
                   </div>
                 </div>
-                <Download size={18} style={{ opacity: 0.8 }} />
+                <Download size={20} style={{ opacity: 0.9 }} />
               </a>
             )}
           </div>
@@ -329,16 +327,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         {message.status === 'failed' && (
           <div
             style={{
-              marginTop: '6px',
-              padding: '4px 8px',
-              borderRadius: '6px',
+              marginTop: '8px',
+              padding: '6px 10px',
+              borderRadius: '8px',
               background: 'rgba(239, 68, 68, 0.2)',
               border: '1px solid rgba(239, 68, 68, 0.4)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: '8px',
-              fontSize: '12px',
+              gap: '10px',
+              fontSize: '13px',
               color: '#fca5a5'
             }}
           >
@@ -351,17 +349,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   background: '#ef4444',
                   color: '#fff',
                   border: 'none',
-                  borderRadius: '4px',
-                  padding: '2px 8px',
+                  borderRadius: '6px',
+                  padding: '4px 10px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '11.5px',
-                  fontWeight: 600
+                  gap: '6px',
+                  fontSize: '12px',
+                  fontWeight: 700
                 }}
               >
-                <RotateCcw size={12} /> Retry
+                <RotateCcw size={13} /> Retry
               </button>
             )}
           </div>
@@ -373,14 +371,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {renderStatus()}
         </div>
 
-        {/* Interactive Emoji Reactions list */}
+        {/* Interactive Emoji Reactions */}
         {message.reactions && Object.keys(message.reactions).length > 0 && (
           <div
             style={{
               display: 'flex',
               flexWrap: 'wrap',
-              gap: '4px',
-              marginTop: '6px'
+              gap: '6px',
+              marginTop: '8px'
             }}
           >
             {Object.entries(message.reactions).map(([emoji, uids]) => {
@@ -395,24 +393,24 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   title={`${uids.length} reaction${uids.length > 1 ? 's' : ''}`}
                   style={{
                     background: hasReacted
-                      ? 'rgba(59, 130, 246, 0.35)'
-                      : 'rgba(0, 0, 0, 0.25)',
+                      ? 'rgba(37, 99, 235, 0.4)'
+                      : 'rgba(0, 0, 0, 0.28)',
                     border: hasReacted
                       ? '1px solid #3b82f6'
-                      : '1px solid rgba(255, 255, 255, 0.1)',
-                    borderRadius: '12px',
-                    padding: '2px 6px',
-                    fontSize: '12px',
+                      : '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: '14px',
+                    padding: '3px 8px',
+                    fontSize: '13.5px',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '4px',
+                    gap: '5px',
                     color: '#fff',
                     cursor: 'pointer',
                     userSelect: 'none'
                   }}
                 >
                   <span>{emoji}</span>
-                  <span style={{ fontSize: '11px', fontWeight: 600 }}>{uids.length}</span>
+                  <span style={{ fontSize: '12px', fontWeight: 700 }}>{uids.length}</span>
                 </button>
               );
             })}
@@ -425,21 +423,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         <div
           style={{
             position: 'absolute',
-            top: '-20px',
+            top: '-24px',
             [isOutgoing ? 'right' : 'left']: '48px',
             background: 'var(--bg-secondary)',
             border: '1px solid var(--border-color)',
-            borderRadius: '20px',
-            padding: '2px 6px',
+            borderRadius: '24px',
+            padding: '4px 8px',
             display: 'flex',
             alignItems: 'center',
-            gap: '4px',
+            gap: '6px',
             boxShadow: 'var(--shadow-md)',
             zIndex: 10,
             animation: 'fadeIn 0.15s ease'
           }}
         >
-          {/* Reaction Picker Button */}
           <button
             type="button"
             onClick={() => setShowReactionPicker(!showReactionPicker)}
@@ -448,17 +445,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               border: 'none',
               color: 'var(--text-secondary)',
               cursor: 'pointer',
-              padding: '4px',
+              padding: '6px',
               borderRadius: '50%',
               display: 'flex',
               alignItems: 'center'
             }}
             title="Add Reaction"
           >
-            <Smile size={16} />
+            <Smile size={18} />
           </button>
 
-          {/* Reply Button */}
           {onReply && (
             <button
               type="button"
@@ -468,18 +464,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 border: 'none',
                 color: 'var(--text-secondary)',
                 cursor: 'pointer',
-                padding: '4px',
+                padding: '6px',
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center'
               }}
               title="Reply"
             >
-              <Reply size={16} />
+              <Reply size={18} />
             </button>
           )}
 
-          {/* Delete Button (sender only) */}
           {isOutgoing && onDelete && (
             <button
               type="button"
@@ -489,14 +484,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 border: 'none',
                 color: '#ef4444',
                 cursor: 'pointer',
-                padding: '4px',
+                padding: '6px',
                 borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center'
               }}
               title="Delete message"
             >
-              <Trash2 size={15} />
+              <Trash2 size={16} />
             </button>
           )}
         </div>
@@ -507,16 +502,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         <div
           style={{
             position: 'absolute',
-            top: '-54px',
+            top: '-58px',
             [isOutgoing ? 'right' : 'left']: '48px',
             background: 'var(--bg-secondary)',
             border: '1px solid var(--border-color)',
-            borderRadius: '24px',
-            padding: '4px 8px',
+            borderRadius: '26px',
+            padding: '6px 10px',
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            boxShadow: 'var(--shadow-lg)',
+            gap: '8px',
+            boxShadow: 'var(--shadow-xl)',
             zIndex: 11,
             animation: 'scaleUp 0.15s ease'
           }}
@@ -532,10 +527,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               style={{
                 background: 'transparent',
                 border: 'none',
-                fontSize: '18px',
+                fontSize: '20px',
                 cursor: 'pointer',
-                padding: '2px 4px',
-                borderRadius: '6px',
+                padding: '4px',
+                borderRadius: '8px',
                 transition: 'transform 0.1s ease'
               }}
               onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.25)')}

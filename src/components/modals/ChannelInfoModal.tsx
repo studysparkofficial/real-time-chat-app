@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Hash, Activity, Users, Shield, Radio } from 'lucide-react';
+import { X, Hash, Activity, Users, Radio, MapPin } from 'lucide-react';
 import { ChatRoom, ChatUser } from '../../types/chat.types';
 import { Avatar } from '../common/Avatar';
 
@@ -22,50 +22,61 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
 
   const isEmoji = room.icon && room.icon !== '#';
 
-  // Latency quality color
   const latencyColor =
     latencyMs < 50 ? '#10b981' : latencyMs < 120 ? '#f59e0b' : '#ef4444';
   const latencyStatusText =
-    latencyMs < 50 ? 'Optimal Connection' : latencyMs < 120 ? 'Good' : 'Elevated Latency';
+    latencyMs < 50 ? 'Optimal Network' : latencyMs < 120 ? 'Good' : 'Lag Warning';
 
   return (
     <div className="modal-overlay as-sheet" onClick={onClose}>
       <div
         className="modal-content"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '440px' }}
+        style={{ maxWidth: '460px' }}
       >
+        {/* Mobile Drag Indicator */}
+        <div
+          style={{
+            width: '40px',
+            height: '4px',
+            borderRadius: '2px',
+            background: 'var(--border-color)',
+            margin: '0 auto 16px auto'
+          }}
+        />
+
         {/* Header */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            marginBottom: '16px'
+            marginBottom: '18px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div
               style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
+                width: '42px',
+                height: '42px',
+                borderRadius: '12px',
                 background: 'var(--bg-tertiary)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: isEmoji ? '16px' : '14px',
-                color: 'var(--accent-primary)'
+                fontSize: isEmoji ? '22px' : '18px',
+                color: 'var(--accent-primary)',
+                flexShrink: 0
               }}
             >
-              {isEmoji ? room.icon : <Hash size={18} />}
+              {isEmoji ? room.icon : <Hash size={20} />}
             </div>
             <div>
-              <h3 style={{ fontSize: '17px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                {room.name}
+              <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                #{room.name}
               </h3>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                #{room.slug}
+              <div style={{ fontSize: '12px', color: 'var(--accent-gold)', fontWeight: 600 }}>
+                JNUverse Campus Stream
               </div>
             </div>
           </div>
@@ -77,28 +88,39 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
               border: 'none',
               color: 'var(--text-muted)',
               cursor: 'pointer',
-              padding: '4px'
+              padding: '6px'
             }}
           >
-            <X size={20} />
+            <X size={22} />
           </button>
         </div>
 
         {/* Channel Topic Card */}
         <div
           style={{
-            padding: '12px 14px',
+            padding: '14px 16px',
             background: 'var(--bg-card)',
-            borderRadius: '12px',
+            borderRadius: '14px',
             border: '1px solid var(--border-color)',
             marginBottom: '16px'
           }}
         >
-          <div style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '4px' }}>
-            CHANNEL TOPIC
+          <div
+            style={{
+              fontSize: '12px',
+              fontWeight: 700,
+              color: 'var(--text-muted)',
+              marginBottom: '6px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
+          >
+            <MapPin size={13} color="var(--accent-gold)" />
+            <span>CHANNEL TOPIC</span>
           </div>
-          <p style={{ fontSize: '13.5px', color: 'var(--text-primary)', lineHeight: 1.4 }}>
-            {room.topic || 'No topic set for this room.'}
+          <p style={{ fontSize: '14.5px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+            {room.topic || 'General university discussion channel for JNU scholars.'}
           </p>
         </div>
 
@@ -108,18 +130,20 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '10px 14px',
+            padding: '12px 16px',
             background: 'var(--bg-input)',
-            borderRadius: '12px',
+            borderRadius: '14px',
             border: '1px solid var(--border-color)',
-            marginBottom: '18px'
+            marginBottom: '20px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Activity size={18} color={latencyColor} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Activity size={20} color={latencyColor} />
             <div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>STREAM LATENCY</div>
-              <div style={{ fontSize: '13px', fontWeight: 600, color: latencyColor }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>
+                CAMPUS LATENCY
+              </div>
+              <div style={{ fontSize: '14px', fontWeight: 700, color: latencyColor }}>
                 {latencyMs} ms · {latencyStatusText}
               </div>
             </div>
@@ -128,16 +152,17 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '4px',
-              fontSize: '11px',
-              color: 'var(--text-muted)',
-              background: 'var(--bg-card-hover)',
-              padding: '4px 8px',
-              borderRadius: '6px'
+              gap: '6px',
+              fontSize: '12px',
+              fontWeight: 600,
+              color: '#10b981',
+              background: 'rgba(16, 185, 129, 0.12)',
+              padding: '6px 10px',
+              borderRadius: '8px'
             }}
           >
-            <Radio size={12} color="#10b981" />
-            <span>Multi-Tab Sync</span>
+            <Radio size={13} color="#10b981" />
+            <span>Real-Time Sync</span>
           </div>
         </div>
 
@@ -148,37 +173,37 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              marginBottom: '10px'
+              marginBottom: '12px'
             }}
           >
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
-                fontSize: '12.5px',
-                fontWeight: 700,
+                gap: '8px',
+                fontSize: '13px',
+                fontWeight: 800,
                 color: 'var(--text-muted)',
                 textTransform: 'uppercase'
               }}
             >
-              <Users size={14} />
-              <span>ACTIVE MEMBERS ({onlineMembers.length})</span>
+              <Users size={16} />
+              <span>ONLINE SCHOLARS & STUDENTS ({onlineMembers.length})</span>
             </div>
           </div>
 
           <div
             style={{
-              maxHeight: '260px',
+              maxHeight: '280px',
               overflowY: 'auto',
               display: 'flex',
               flexDirection: 'column',
-              gap: '8px'
+              gap: '10px'
             }}
           >
             {onlineMembers.length === 0 ? (
-              <div style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', padding: '16px' }}>
-                No other members currently active
+              <div style={{ fontSize: '14px', color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>
+                No other scholars currently active in this channel
               </div>
             ) : (
               onlineMembers.map((member) => (
@@ -187,9 +212,9 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '10px',
-                    padding: '6px 8px',
-                    borderRadius: '8px',
+                    gap: '12px',
+                    padding: '8px 12px',
+                    borderRadius: '12px',
                     background: 'var(--bg-card)',
                     border: '1px solid var(--border-color)'
                   }}
@@ -203,8 +228,8 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{
-                        fontSize: '13.5px',
-                        fontWeight: 600,
+                        fontSize: '14.5px',
+                        fontWeight: 700,
                         color: 'var(--text-primary)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
@@ -218,10 +243,10 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
                       {member.isAnonymous && (
                         <span
                           style={{
-                            fontSize: '10px',
-                            padding: '1px 5px',
+                            fontSize: '10.5px',
+                            padding: '2px 6px',
                             borderRadius: '4px',
-                            background: 'rgba(255,255,255,0.08)',
+                            background: 'rgba(255,255,255,0.1)',
                             color: 'var(--text-muted)'
                           }}
                         >
@@ -231,14 +256,14 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
                     </div>
                     <div
                       style={{
-                        fontSize: '11.5px',
+                        fontSize: '12px',
                         color: 'var(--text-muted)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap'
                       }}
                     >
-                      {member.bio || 'PulseChat Member'}
+                      {member.bio || 'JNU Scholar / Student'}
                     </div>
                   </div>
                 </div>

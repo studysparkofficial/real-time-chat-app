@@ -69,42 +69,55 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay as-sheet" onClick={onClose}>
       <div
         className="modal-content"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '420px' }}
+        style={{ maxWidth: '440px' }}
       >
+        {/* Drag Indicator */}
+        <div
+          style={{
+            width: '40px',
+            height: '4px',
+            borderRadius: '2px',
+            background: 'var(--border-color)',
+            margin: '0 auto 16px auto'
+          }}
+        />
+
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            marginBottom: '16px'
+            marginBottom: '18px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <img
+              src="/jnu-logo.png"
+              alt="JNU"
               style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
-                background: 'var(--accent-gradient)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#fff'
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+                border: '1px solid var(--accent-gold)'
               }}
-            >
-              <ShieldCheck size={18} />
+            />
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                {mode === 'signin'
+                  ? 'Sign in to JNUverse'
+                  : mode === 'signup'
+                  ? 'Join JNUverse'
+                  : 'Enter as Guest'}
+              </h3>
+              <div style={{ fontSize: '11px', color: 'var(--accent-gold)', fontWeight: 600 }}>
+                JNU CAMPUS HUB
+              </div>
             </div>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-              {mode === 'signin'
-                ? 'Welcome Back'
-                : mode === 'signup'
-                ? 'Create Pulse Account'
-                : 'Join as Guest'}
-            </h3>
           </div>
           <button
             onClick={onClose}
@@ -113,10 +126,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               border: 'none',
               color: 'var(--text-muted)',
               cursor: 'pointer',
-              padding: '4px'
+              padding: '6px'
             }}
           >
-            <X size={20} />
+            <X size={22} />
           </button>
         </div>
 
@@ -126,8 +139,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             display: 'flex',
             background: 'var(--bg-tertiary)',
             padding: '4px',
-            borderRadius: '10px',
-            marginBottom: '18px'
+            borderRadius: '12px',
+            marginBottom: '20px'
           }}
         >
           <button
@@ -138,14 +151,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             }}
             style={{
               flex: 1,
-              padding: '6px 0',
-              borderRadius: '8px',
+              padding: '8px 0',
+              borderRadius: '10px',
               border: 'none',
               background: mode === 'signin' ? 'var(--bg-secondary)' : 'transparent',
               color: mode === 'signin' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              fontWeight: mode === 'signin' ? 600 : 400,
+              fontWeight: mode === 'signin' ? 700 : 500,
               cursor: 'pointer',
-              fontSize: '13px'
+              fontSize: '14px'
             }}
           >
             Sign In
@@ -158,17 +171,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             }}
             style={{
               flex: 1,
-              padding: '6px 0',
-              borderRadius: '8px',
+              padding: '8px 0',
+              borderRadius: '10px',
               border: 'none',
               background: mode === 'signup' ? 'var(--bg-secondary)' : 'transparent',
               color: mode === 'signup' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              fontWeight: mode === 'signup' ? 600 : 400,
+              fontWeight: mode === 'signup' ? 700 : 500,
               cursor: 'pointer',
-              fontSize: '13px'
+              fontSize: '14px'
             }}
           >
-            Sign Up
+            Register
           </button>
           <button
             type="button"
@@ -178,14 +191,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             }}
             style={{
               flex: 1,
-              padding: '6px 0',
-              borderRadius: '8px',
+              padding: '8px 0',
+              borderRadius: '10px',
               border: 'none',
               background: mode === 'guest' ? 'var(--bg-secondary)' : 'transparent',
               color: mode === 'guest' ? 'var(--text-primary)' : 'var(--text-secondary)',
-              fontWeight: mode === 'guest' ? 600 : 400,
+              fontWeight: mode === 'guest' ? 700 : 500,
               cursor: 'pointer',
-              fontSize: '13px'
+              fontSize: '14px'
             }}
           >
             Guest Pass
@@ -195,20 +208,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {error && (
           <div
             style={{
-              padding: '8px 12px',
-              borderRadius: '8px',
+              padding: '10px 14px',
+              borderRadius: '10px',
               background: 'rgba(239, 68, 68, 0.15)',
               border: '1px solid rgba(239, 68, 68, 0.3)',
               color: '#f87171',
-              fontSize: '13px',
-              marginBottom: '14px'
+              fontSize: '13.5px',
+              marginBottom: '16px'
             }}
           >
             {error}
           </div>
         )}
 
-        {/* 1-Click Google Sign In (for signin & signup) */}
+        {/* 1-Click Google Sign In */}
         {mode !== 'guest' && (
           <>
             <button
@@ -217,23 +230,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               disabled={loading}
               style={{
                 width: '100%',
-                padding: '10px 14px',
-                borderRadius: '10px',
+                padding: '12px 16px',
+                borderRadius: '12px',
                 border: '1px solid var(--border-color)',
                 background: 'var(--bg-card-hover)',
                 color: 'var(--text-primary)',
-                fontWeight: 600,
-                fontSize: '14px',
+                fontWeight: 700,
+                fontSize: '15px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '10px',
+                gap: '12px',
                 cursor: 'pointer',
                 marginBottom: '16px',
-                minHeight: '44px'
+                minHeight: '48px'
               }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24">
+              <svg width="20" height="20" viewBox="0 0 24 24">
                 <path
                   fill="#4285F4"
                   d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
@@ -251,47 +264,48 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
                 />
               </svg>
-              Continue with Google
+              Continue with Google (jnu.ac.in / Gmail)
             </button>
 
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                margin: '14px 0',
+                margin: '16px 0',
                 color: 'var(--text-muted)',
-                fontSize: '12px'
+                fontSize: '12px',
+                fontWeight: 600
               }}
             >
               <div style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
-              <span style={{ padding: '0 10px' }}>OR WITH EMAIL</span>
+              <span style={{ padding: '0 12px' }}>OR USE CAMPUS EMAIL</span>
               <div style={{ flex: 1, height: '1px', background: 'var(--border-color)' }} />
             </div>
           </>
         )}
 
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {mode === 'signup' && (
             <div>
-              <label style={{ display: 'block', fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                Full Name / Nickname
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                Full Name / Scholar Name
               </label>
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
+                  gap: '10px',
                   background: 'var(--bg-input)',
                   border: '1px solid var(--border-color)',
-                  borderRadius: '10px',
-                  padding: '8px 12px'
+                  borderRadius: '12px',
+                  padding: '10px 14px'
                 }}
               >
-                <User size={16} color="var(--text-muted)" />
+                <User size={18} color="var(--text-muted)" />
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Alex Mercer"
+                  placeholder="e.g. Priyanshu Sharma"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
                   style={{
@@ -299,7 +313,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     background: 'transparent',
                     border: 'none',
                     outline: 'none',
-                    color: 'var(--text-primary)'
+                    color: 'var(--text-primary)',
+                    fontSize: '15px'
                   }}
                 />
               </div>
@@ -308,24 +323,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
           {mode === 'guest' ? (
             <div>
-              <label style={{ display: 'block', fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                Guest Nickname (optional)
+              <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                Guest Scholar Nickname
               </label>
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
+                  gap: '10px',
                   background: 'var(--bg-input)',
                   border: '1px solid var(--border-color)',
-                  borderRadius: '10px',
-                  padding: '8px 12px'
+                  borderRadius: '12px',
+                  padding: '10px 14px'
                 }}
               >
-                <UserCheck size={16} color="var(--text-muted)" />
+                <UserCheck size={18} color="var(--text-muted)" />
                 <input
                   type="text"
-                  placeholder="e.g. Guest Observer"
+                  placeholder="e.g. Visitor Scholar"
                   value={guestName}
                   onChange={(e) => setGuestName(e.target.value)}
                   style={{
@@ -333,36 +348,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     background: 'transparent',
                     border: 'none',
                     outline: 'none',
-                    color: 'var(--text-primary)'
+                    color: 'var(--text-primary)',
+                    fontSize: '15px'
                   }}
                 />
               </div>
-              <p style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '6px' }}>
-                Guest accounts require no email. You can post and test real-time chat instantly.
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
+                Guest entry allows immediate real-time chat with no signup needed.
               </p>
             </div>
           ) : (
             <>
               <div>
-                <label style={{ display: 'block', fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                   Email Address
                 </label>
                 <div
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '8px',
+                    gap: '10px',
                     background: 'var(--bg-input)',
                     border: '1px solid var(--border-color)',
-                    borderRadius: '10px',
-                    padding: '8px 12px'
+                    borderRadius: '12px',
+                    padding: '10px 14px'
                   }}
                 >
-                  <Mail size={16} color="var(--text-muted)" />
+                  <Mail size={18} color="var(--text-muted)" />
                   <input
                     type="email"
                     required
-                    placeholder="you@company.com"
+                    placeholder="scholar@jnu.ac.in or gmail"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     style={{
@@ -370,28 +386,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       background: 'transparent',
                       border: 'none',
                       outline: 'none',
-                      color: 'var(--text-primary)'
+                      color: 'var(--text-primary)',
+                      fontSize: '15px'
                     }}
                   />
                 </div>
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '12.5px', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
                   Password
                 </label>
                 <div
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '8px',
+                    gap: '10px',
                     background: 'var(--bg-input)',
                     border: '1px solid var(--border-color)',
-                    borderRadius: '10px',
-                    padding: '8px 12px'
+                    borderRadius: '12px',
+                    padding: '10px 14px'
                   }}
                 >
-                  <Lock size={16} color="var(--text-muted)" />
+                  <Lock size={18} color="var(--text-muted)" />
                   <input
                     type="password"
                     required
@@ -403,7 +420,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       background: 'transparent',
                       border: 'none',
                       outline: 'none',
-                      color: 'var(--text-primary)'
+                      color: 'var(--text-primary)',
+                      fontSize: '15px'
                     }}
                   />
                 </div>
@@ -414,12 +432,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <Button
             type="submit"
             loading={loading}
-            style={{ width: '100%', marginTop: '8px' }}
+            style={{ width: '100%', marginTop: '8px', minHeight: '48px', fontSize: '15px' }}
           >
             {mode === 'signin'
-              ? 'Sign In to Pulse'
+              ? 'Enter JNUverse'
               : mode === 'signup'
-              ? 'Create Account'
+              ? 'Create Scholar Account'
               : 'Enter as Guest'}
           </Button>
         </form>

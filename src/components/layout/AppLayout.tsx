@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { WifiOff, Radio } from 'lucide-react';
+import React from 'react';
+import { WifiOff } from 'lucide-react';
 import { Header } from './Header';
 import { MobileDrawerBackdrop } from './MobileDrawerBackdrop';
 import { ChannelsSidebar } from '../sidebar/ChannelsSidebar';
@@ -55,6 +55,8 @@ interface AppLayoutProps {
   onOpenChannelInfo: () => void;
   isSidebarOpenMobile: boolean;
   setIsSidebarOpenMobile: (open: boolean) => void;
+  isDesktopSidebarOpen: boolean;
+  setIsDesktopSidebarOpen: (open: boolean) => void;
   toasts: ToastMessage[];
   onDismissToast: (id: string) => void;
   unreadCounts: Record<string, number>;
@@ -99,18 +101,33 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onOpenChannelInfo,
   isSidebarOpenMobile,
   setIsSidebarOpenMobile,
+  isDesktopSidebarOpen,
+  setIsDesktopSidebarOpen,
   toasts,
   onDismissToast,
   unreadCounts
 }) => {
+  const handleToggleSidebar = () => {
+    if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+      setIsSidebarOpenMobile(!isSidebarOpenMobile);
+    } else {
+      setIsDesktopSidebarOpen(!isDesktopSidebarOpen);
+    }
+  };
+
+  const handleCloseSidebar = () => {
+    setIsSidebarOpenMobile(false);
+    setIsDesktopSidebarOpen(false);
+  };
+
   return (
     <div className="pulse-app">
       {/* Offline Status Top Banner */}
       {!isOnline && (
         <div className="offline-banner">
           <div className="offline-pulse-dot" />
-          <WifiOff size={16} />
-          <span>Connecting to PulseChat… Outgoing messages are queued safely in IndexedDB</span>
+          <WifiOff size={18} />
+          <span>Connecting to JNUverse… Outbox queued locally</span>
         </div>
       )}
 
@@ -120,7 +137,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         onClose={() => setIsSidebarOpenMobile(false)}
       />
 
-      {/* Channels Sidebar (Fixed Desktop 260px / Mobile Off-Canvas Drawer) */}
+      {/* Channels Sidebar: Works seamlessly on both Desktop & Mobile */}
       <ChannelsSidebar
         rooms={rooms}
         activeRoomId={activeRoom.id}
@@ -131,24 +148,25 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         onOpenAccountModal={onOpenAccountModal}
         onOpenAuthModal={onOpenAuthModal}
         isOpenMobile={isSidebarOpenMobile}
-        onCloseMobile={() => setIsSidebarOpenMobile(false)}
+        isDesktopOpen={isDesktopSidebarOpen}
+        onCloseSidebar={handleCloseSidebar}
       />
 
       {/* Main Chat Area */}
       <main className="chat-main">
-        {/* Chat Header */}
+        {/* JNUverse Header */}
         <Header
           currentRoom={activeRoom}
           onlineCount={onlineCount}
           currentUser={currentUser}
           theme={preferences.theme}
           onToggleTheme={onToggleTheme}
-          onToggleSidebar={() => setIsSidebarOpenMobile(!isSidebarOpenMobile)}
+          onToggleSidebar={handleToggleSidebar}
           onOpenChannelInfo={onOpenChannelInfo}
           onOpenAccountModal={onOpenAccountModal}
         />
 
-        {/* Message Stream with Virtualization & Error Boundary */}
+        {/* Virtualized Message Stream with Error Boundary */}
         <ErrorBoundary fallbackMessage="Unable to render message stream">
           <VirtualizedMessageList
             messages={messages}

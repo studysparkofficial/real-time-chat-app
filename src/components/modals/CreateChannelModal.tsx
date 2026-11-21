@@ -14,7 +14,7 @@ interface CreateChannelModalProps {
   onShowToast: (text: string) => void;
 }
 
-const CHANNEL_ICONS = ['💬', '⚡', '🚀', '🛠️', '🎨', '🔥', '💡', '🎮', '☕', '📢', '🧪', '🔒'];
+const JNU_CHANNEL_ICONS = ['🏛️', '☕', '📚', '🎓', '🛏️', '🎭', '🔍', '💡', '🔥', '🚀', '⚽', '🌿'];
 
 export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   isOpen,
@@ -24,7 +24,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
 }) => {
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
-  const [icon, setIcon] = useState('💬');
+  const [icon, setIcon] = useState('🏛️');
   const [topic, setTopic] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +33,6 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
 
   const handleNameChange = (val: string) => {
     setName(val);
-    // Auto-generate clean lowercase slug
     const generated = val
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
@@ -61,9 +60,9 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         name: name.trim(),
         slug: slug.trim(),
         icon,
-        topic: topic.trim() || `Discussion about ${name.trim()}`
+        topic: topic.trim() || `Discussions for ${name.trim()} on JNU Campus`
       });
-      onShowToast(`Created #${slug}`);
+      onShowToast(`Created #${slug} in JNUverse`);
       setName('');
       setSlug('');
       setTopic('');
@@ -77,26 +76,36 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <div className="modal-overlay as-sheet" onClick={onClose}>
       <div
         className="modal-content"
         onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: '440px' }}
+        style={{ maxWidth: '460px' }}
       >
+        <div
+          style={{
+            width: '40px',
+            height: '4px',
+            borderRadius: '2px',
+            background: 'var(--border-color)',
+            margin: '0 auto 16px auto'
+          }}
+        />
+
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            marginBottom: '16px'
+            marginBottom: '18px'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div
               style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
+                width: '36px',
+                height: '36px',
+                borderRadius: '10px',
                 background: 'var(--accent-gradient)',
                 display: 'flex',
                 alignItems: 'center',
@@ -104,11 +113,16 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
                 color: '#fff'
               }}
             >
-              <Plus size={18} />
+              <Plus size={20} />
             </div>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-              Create New Channel
-            </h3>
+            <div>
+              <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                Create JNU Channel
+              </h3>
+              <div style={{ fontSize: '12px', color: 'var(--accent-gold)', fontWeight: 600 }}>
+                Campus Hub Group
+              </div>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -117,23 +131,23 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
               border: 'none',
               color: 'var(--text-muted)',
               cursor: 'pointer',
-              padding: '4px'
+              padding: '6px'
             }}
           >
-            <X size={20} />
+            <X size={22} />
           </button>
         </div>
 
         {error && (
           <div
             style={{
-              padding: '8px 12px',
-              borderRadius: '8px',
+              padding: '10px 14px',
+              borderRadius: '10px',
               background: 'rgba(239, 68, 68, 0.15)',
               border: '1px solid rgba(239, 68, 68, 0.3)',
               color: '#f87171',
-              fontSize: '13px',
-              marginBottom: '14px'
+              fontSize: '13.5px',
+              marginBottom: '16px'
             }}
           >
             {error}
@@ -143,7 +157,7 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {/* Icon Selector */}
           <div>
-            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '8px' }}>
               Channel Icon
             </label>
             <div
@@ -152,11 +166,11 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
                 gridTemplateColumns: 'repeat(6, 1fr)',
                 gap: '8px',
                 background: 'var(--bg-input)',
-                padding: '8px',
-                borderRadius: '10px'
+                padding: '10px',
+                borderRadius: '12px'
               }}
             >
-              {CHANNEL_ICONS.map((emoji) => (
+              {JNU_CHANNEL_ICONS.map((emoji) => (
                 <button
                   key={emoji}
                   type="button"
@@ -164,9 +178,9 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
                   style={{
                     background: icon === emoji ? 'var(--accent-primary)' : 'transparent',
                     border: 'none',
-                    borderRadius: '8px',
-                    fontSize: '20px',
-                    padding: '6px 0',
+                    borderRadius: '10px',
+                    fontSize: '22px',
+                    padding: '8px 0',
                     cursor: 'pointer'
                   }}
                 >
@@ -178,53 +192,53 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
 
           {/* Channel Name */}
           <div>
-            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
               Channel Name
             </label>
             <input
               type="text"
               required
-              maxLength={30}
-              placeholder="e.g. Frontend Architecture"
+              maxLength={40}
+              placeholder="e.g. Kaveri Hostel / SES Ecology"
               value={name}
               onChange={(e) => handleNameChange(e.target.value)}
               style={{
                 width: '100%',
                 background: 'var(--bg-input)',
                 border: '1px solid var(--border-color)',
-                borderRadius: '10px',
-                padding: '10px 12px',
+                borderRadius: '12px',
+                padding: '12px 14px',
                 color: 'var(--text-primary)',
                 outline: 'none',
-                fontSize: '14px'
+                fontSize: '15px'
               }}
             />
           </div>
 
           {/* Slug Preview */}
           <div>
-            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-              Channel URL Handle
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              Channel Handle
             </label>
             <div
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px',
+                gap: '8px',
                 background: 'var(--bg-input)',
                 border: '1px solid var(--border-color)',
-                borderRadius: '10px',
-                padding: '10px 12px',
+                borderRadius: '12px',
+                padding: '12px 14px',
                 color: 'var(--text-secondary)',
-                fontSize: '13.5px'
+                fontSize: '14.5px'
               }}
             >
-              <Hash size={16} />
+              <Hash size={18} />
               <input
                 type="text"
                 required
-                maxLength={30}
-                placeholder="frontend-architecture"
+                maxLength={40}
+                placeholder="kaveri-hostel"
                 value={slug}
                 onChange={(e) =>
                   setSlug(
@@ -247,29 +261,29 @@ export const CreateChannelModal: React.FC<CreateChannelModalProps> = ({
 
           {/* Topic */}
           <div>
-            <label style={{ display: 'block', fontSize: '12.5px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-              Topic / Purpose (optional)
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+              Topic / Purpose
             </label>
             <input
               type="text"
               maxLength={120}
-              placeholder="What should members talk about here?"
+              placeholder="What can scholars discuss in this channel?"
               value={topic}
               onChange={(e) => setTopic(e.target.value)}
               style={{
                 width: '100%',
                 background: 'var(--bg-input)',
                 border: '1px solid var(--border-color)',
-                borderRadius: '10px',
-                padding: '10px 12px',
+                borderRadius: '12px',
+                padding: '12px 14px',
                 color: 'var(--text-primary)',
                 outline: 'none',
-                fontSize: '14px'
+                fontSize: '15px'
               }}
             />
           </div>
 
-          <Button type="submit" loading={loading} style={{ marginTop: '8px' }}>
+          <Button type="submit" loading={loading} style={{ marginTop: '10px', minHeight: '48px', fontSize: '15px' }}>
             Create Channel
           </Button>
         </form>

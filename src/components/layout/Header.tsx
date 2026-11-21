@@ -1,5 +1,5 @@
 import React from 'react';
-import { MoreVertical, Hash, Info, Moon, Sun, Users } from 'lucide-react';
+import { MoreVertical, Hash, Moon, Sun, Users } from 'lucide-react';
 import { ChatRoom, ChatUser } from '../../types/chat.types';
 import { Avatar } from '../common/Avatar';
 
@@ -28,18 +28,35 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="chat-header">
-      {/* Left: 3-Dots Drawer Toggle + Channel Title & Subtitle */}
+      {/* Left: 3-Dots Drawer Toggle + JNU Emblem + Channel Info */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-        {/* Dedicated 3-Dots Button (⋮) */}
+        {/* Dedicated 3-Dots Button (⋮) to toggle left sidebar */}
         <button
           type="button"
           onClick={onToggleSidebar}
           className="header-action-btn"
           aria-label="Toggle Channels Menu"
-          title="Channels Menu (⋮)"
+          title="Toggle Channels Menu (⋮)"
         >
-          <MoreVertical size={20} />
+          <MoreVertical size={24} />
         </button>
+
+        {/* JNU Official Logo Thumbnail */}
+        <img
+          src="/jnu-logo.png"
+          alt="JNU"
+          onClick={onToggleSidebar}
+          style={{
+            width: '38px',
+            height: '38px',
+            borderRadius: '50%',
+            objectFit: 'cover',
+            border: '2px solid var(--accent-gold, #f59e0b)',
+            cursor: 'pointer',
+            flexShrink: 0
+          }}
+          title="JNUverse Campus Hub"
+        />
 
         {/* Tapping channel header triggers Channel Info & Active Members Sheet */}
         <div
@@ -51,19 +68,19 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <div
             style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
+              width: '38px',
+              height: '38px',
+              borderRadius: '12px',
               background: 'var(--bg-tertiary)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: isEmoji ? '18px' : '15px',
+              fontSize: isEmoji ? '20px' : '17px',
               color: 'var(--accent-primary)',
               flexShrink: 0
             }}
           >
-            {isEmoji ? currentRoom.icon : <Hash size={18} />}
+            {isEmoji ? currentRoom.icon : <Hash size={20} />}
           </div>
 
           <div style={{ minWidth: 0 }}>
@@ -76,10 +93,10 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <h2
                 style={{
-                  fontSize: '15px',
+                  fontSize: '17px',
                   fontWeight: 700,
                   color: 'var(--text-primary)',
-                  letterSpacing: '-0.2px',
+                  letterSpacing: '-0.3px',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis'
@@ -90,7 +107,7 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
             <div
               style={{
-                fontSize: '12px',
+                fontSize: '12.5px',
                 color: 'var(--text-muted)',
                 display: 'flex',
                 alignItems: 'center',
@@ -100,27 +117,27 @@ export const Header: React.FC<HeaderProps> = ({
               <span
                 style={{
                   display: 'inline-block',
-                  width: '6px',
-                  height: '6px',
+                  width: '7px',
+                  height: '7px',
                   borderRadius: '50%',
                   background: 'var(--status-online, #10b981)'
                 }}
               />
-              <span>{onlineCount} {onlineCount === 1 ? 'member' : 'members'} online</span>
+              <span>{onlineCount} {onlineCount === 1 ? 'scholar' : 'scholars'} online</span>
             </div>
           </div>
         </div>
       </div>
 
       {/* Right Action Icons: Channel Info, Theme Toggle, Profile Avatar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <button
           type="button"
           onClick={onOpenChannelInfo}
           className="header-action-btn"
           title="Channel Info & Members"
         >
-          <Users size={19} />
+          <Users size={22} />
         </button>
 
         <button
@@ -129,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
           className="header-action-btn"
           title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
         >
-          {theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}
+          {theme === 'dark' ? <Sun size={22} /> : <Moon size={22} />}
         </button>
 
         {currentUser && (
@@ -147,13 +164,13 @@ export const Header: React.FC<HeaderProps> = ({
               justifyContent: 'center',
               marginLeft: '4px'
             }}
-            title="Account Settings"
+            title="Account & Profile Settings"
           >
             <Avatar
               src={currentUser.photoURL}
               name={currentUser.displayName}
               status={currentUser.status}
-              size="sm"
+              size="md"
             />
           </button>
         )}
