@@ -611,3 +611,34 @@ input, textarea, select, button {
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
 }
+
+/* JNUverse Brand Styling - High Contrast in Both Dark & Light Themes */
+.jnuverse-logo-title {
+  font-weight: 800;
+  font-size: 19px;
+  letter-spacing: -0.4px;
+  line-height: 1.2;
+}
+
+[data-theme="dark"] .jnuverse-logo-title {
+  background: linear-gradient(135deg, #ffffff 0%, #60a5fa 65%, #f59e0b 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+[data-theme="light"] .jnuverse-logo-title {
+  background: linear-gradient(135deg, #1e3a8a 0%, #1d4ed8 65%, #b45309 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.jnuverse-logo-sub {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: var(--accent-gold);
+}
+
+[data-theme="light"] .jnuverse-logo-sub {
+  color: #b45309;
+}

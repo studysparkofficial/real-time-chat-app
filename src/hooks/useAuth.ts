@@ -57,12 +57,12 @@ export function useAuth() {
         if (fbUser) {
           const chatUser: ChatUser = {
             uid: fbUser.uid,
-            displayName: fbUser.displayName || (fbUser.isAnonymous ? 'Guest User' : 'Pulse Member'),
+            displayName: fbUser.displayName || (fbUser.isAnonymous ? 'Guest Scholar' : 'JNU Scholar'),
             email: fbUser.email,
             photoURL: fbUser.photoURL || '👤',
             isAnonymous: fbUser.isAnonymous,
             status: 'online',
-            bio: 'Available on PulseChat',
+            bio: 'Scholar at JNUverse',
             lastSeen: Date.now()
           };
           setUser(chatUser);

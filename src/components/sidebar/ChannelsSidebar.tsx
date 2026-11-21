@@ -53,7 +53,7 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
           justifyContent: 'space-between',
           padding: '0 16px',
           borderBottom: '1px solid var(--border-color)',
-          background: 'rgba(13, 21, 39, 0.95)'
+          background: 'var(--bg-secondary)'
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -77,14 +77,7 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
                 gap: '6px'
               }}
             >
-              <span
-                style={{
-                  fontWeight: 800,
-                  fontSize: '18px',
-                  letterSpacing: '-0.3px',
-                  color: 'var(--text-primary)'
-                }}
-              >
+              <span className="jnuverse-logo-title">
                 JNUverse
               </span>
               <span
@@ -98,7 +91,7 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
                 }}
               />
             </div>
-            <div style={{ fontSize: '11px', color: 'var(--accent-gold)', fontWeight: 600 }}>
+            <div className="jnuverse-logo-sub">
               JNU CAMPUS HUB
             </div>
           </div>

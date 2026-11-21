@@ -12,7 +12,7 @@ export const LightboxModal: React.FC<LightboxModalProps> = ({
   isOpen,
   onClose,
   imageUrl,
-  fileName = 'PulseChat_Image'
+  fileName = 'JNUverse_Image'
 }) => {
   const [scale, setScale] = useState(1);
   const [rotation, setRotation] = useState(0);

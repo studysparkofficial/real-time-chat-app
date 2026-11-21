@@ -75,6 +75,7 @@ export const App: React.FC = () => {
   // 1. Auth & Preferences
   const {
     user: currentUser,
+    loading: authLoading,
     preferences,
     loginWithGoogle,
     loginWithEmail,
@@ -101,6 +102,13 @@ export const App: React.FC = () => {
   const [createChannelModalOpen, setCreateChannelModalOpen] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [lightboxName, setLightboxName] = useState<string | undefined>(undefined);
+
+  // Automatically prompt new / unauthenticated visitors with the Authentication Modal
+  useEffect(() => {
+    if (!authLoading && !currentUser) {
+      setAuthModalOpen(true);
+    }
+  }, [authLoading, currentUser]);
 
   // Sidebar Open States: Mobile Drawer + Desktop Collapsible
   const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
