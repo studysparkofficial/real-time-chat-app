@@ -13,6 +13,7 @@ import { useMessages } from './hooks/useMessages';
 import { useAttachments } from './hooks/useAttachments';
 import { useAudio } from './hooks/useAudio';
 import { useHaptics } from './hooks/useHaptics';
+import { usePwaInstall } from './hooks/usePwaInstall';
 
 import { db, collection, addDoc, onSnapshot } from './services/firebase';
 import { localCache } from './services/indexedDbCache';
@@ -73,6 +74,8 @@ const JNU_DEFAULT_ROOMS: ChatRoom[] = [
 ];
 
 export const App: React.FC = () => {
+  const { canInstall, promptInstall } = usePwaInstall();
+
   // 1. Auth & Preferences
   const {
     user: currentUser,
@@ -459,6 +462,8 @@ export const App: React.FC = () => {
         toasts={toasts}
         onDismissToast={dismissToast}
         unreadCounts={unreadCounts}
+        canInstallApp={canInstall}
+        onInstallApp={promptInstall}
       />
 
       {/* Modals & Overlays */}

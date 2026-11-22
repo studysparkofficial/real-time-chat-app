@@ -1,0 +1,28 @@
+{
+  "id": "/",
+  "name": "JNUverse — JNU Campus Hub",
+  "short_name": "JNUverse",
+  "description": "Real-time campus messaging and collaboration for Jawaharlal Nehru University.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone"],
+  "orientation": "any",
+  "background_color": "#070b14",
+  "theme_color": "#070b14",
+  "categories": ["social", "communication"],
+  "icons": [
+    {
+      "src": "/pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

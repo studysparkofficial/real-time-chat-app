@@ -1,5 +1,5 @@
 import React from 'react';
-import { WifiOff } from 'lucide-react';
+import { Download, Smartphone, WifiOff } from 'lucide-react';
 import { Header } from './Header';
 import { MobileDrawerBackdrop } from './MobileDrawerBackdrop';
 import { ChannelsSidebar } from '../sidebar/ChannelsSidebar';
@@ -59,6 +59,8 @@ interface AppLayoutProps {
   toasts: ToastMessage[];
   onDismissToast: (id: string) => void;
   unreadCounts: Record<string, number>;
+  canInstallApp: boolean;
+  onInstallApp: () => Promise<void>;
 }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({
@@ -103,7 +105,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   setIsDesktopSidebarOpen,
   toasts,
   onDismissToast,
-  unreadCounts
+  unreadCounts,
+  canInstallApp,
+  onInstallApp
 }) => {
   const handleToggleSidebar = () => {
     if (typeof window !== 'undefined' && window.innerWidth <= 768) {
@@ -163,6 +167,24 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           onOpenChannelInfo={onOpenChannelInfo}
           onOpenAccountModal={onOpenAccountModal}
         />
+
+        {canInstallApp && (
+          <div className="pwa-install-banner">
+            <div className="pwa-install-copy">
+              <Smartphone size={18} aria-hidden="true" />
+              <span>Add JNUverse to your home screen</span>
+            </div>
+            <button
+              type="button"
+              className="pwa-install-button"
+              onClick={() => void onInstallApp()}
+              aria-label="Install JNUverse App"
+            >
+              <Download size={16} aria-hidden="true" />
+              <span>Install JNUverse App</span>
+            </button>
+          </div>
+        )}
 
         {/* Virtualized Message Stream with Error Boundary */}
         <ErrorBoundary fallbackMessage="Unable to render message stream">
