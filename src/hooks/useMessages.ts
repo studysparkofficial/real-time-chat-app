@@ -142,6 +142,21 @@ function dedupeMessages(list: ChatMessage[]): ChatMessage[] {
   return Array.from(byKey.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
 }
 
+function applyPeerReadReceipt(
+  messages: ChatMessage[],
+  currentUserId: string,
+  peerReadAt: number,
+  isDirectMessage: boolean
+): ChatMessage[] {
+  if (!isDirectMessage) return messages;
+  return messages.map((message) => {
+    if (message.sender.uid !== currentUserId) return message;
+    const messageTime = message.serverTimestamp || message.timestamp;
+    const isRead = peerReadAt > 0 && messageTime <= peerReadAt;
+    return message.isRead === isRead ? message : { ...message, isRead };
+  });
+}
+
 export function useMessages(
   roomId: string,
   currentUser: ChatUser | null,
@@ -158,6 +173,7 @@ export function useMessages(
   // Keep track of optimistic local messages waiting for remote confirmation
   const optimisticMapRef = useRef<Map<string, ChatMessage>>(new Map());
   const hasMountedRef = useRef(false);
+  const peerReadAtRef = useRef(0);
 
   // Monitor online / offline network state. Outbox flushing is handled below so
   // it always uses the current room and authenticated user.
@@ -214,11 +230,15 @@ export function useMessages(
     if (!currentUser?.uid) {
       setMessages([]);
       setInitialLoading(false);
+      peerReadAtRef.current = 0;
       return;
     }
 
     let unsubscribe: (() => void) | null = null;
+    let unsubscribeReadReceipts: (() => void) | null = null;
     let isCurrentRoom = true;
+    const isDirectMessage = isDirectConversationId(roomId);
+    peerReadAtRef.current = 0;
     hasMountedRef.current = false;
     setMessages([]);
     setInitialLoading(true);
@@ -230,10 +250,37 @@ export function useMessages(
         const pendingLocal = Array.from(optimisticMapRef.current.values()).filter(
           (message) => message.roomId === roomId && message.sender.uid === currentUser.uid
         );
-        setMessages(dedupeMessages([...cached, ...pendingLocal]));
+        setMessages(applyPeerReadReceipt(
+          dedupeMessages([...cached, ...pendingLocal]),
+          currentUser.uid,
+          peerReadAtRef.current,
+          isDirectMessage
+        ));
         setInitialLoading(false);
       }
     });
+
+    if (isDirectMessage) {
+      unsubscribeReadReceipts = onSnapshot(
+        collection(db, `rooms/${roomId}/read_receipts`),
+        (snapshot) => {
+          if (!isCurrentRoom) return;
+          let latestPeerReadAt = 0;
+          snapshot.forEach((receiptDoc) => {
+            if (receiptDoc.id === currentUser.uid) return;
+            latestPeerReadAt = Math.max(latestPeerReadAt, toMillis(receiptDoc.data().lastReadAt));
+          });
+          peerReadAtRef.current = latestPeerReadAt;
+          setMessages((previous) => applyPeerReadReceipt(
+            previous,
+            currentUser.uid,
+            latestPeerReadAt,
+            true
+          ));
+        },
+        (error) => console.warn(`[Firestore] Read receipt stream error in ${roomId}:`, error)
+      );
+    }
 
     // 2. Real-time Firestore listener with metadata changes enabled
     const messagesRef = collection(db, `rooms/${roomId}/messages`);
@@ -260,8 +307,8 @@ export function useMessages(
           // Firestore Timestamp on timestamp or createdAt.
           const ts = toMillis(data.timestamp) || toMillis(data.createdAt) || Date.now();
 
-          // If Firestore is still uploading local writes, status is 'sent' (single check)
-          // Once synced to cloud server without pending writes, it's 'delivered' (double check)
+          // This tracks Firestore sync only. Direct-chat read receipts are
+          // applied separately, so a server-synced message can still be unread.
           const isPending = docMetadata.hasPendingWrites;
           const status: ChatMessage['status'] = isPending ? 'sent' : 'delivered';
 
@@ -274,19 +321,26 @@ export function useMessages(
             isAnonymous?: boolean;
           };
           const normalizedAttachment = normalizeAttachment(data.attachment);
+          const senderUid = rawSender.uid || data.senderId || 'unknown';
+          const messageServerTimestamp = toMillis(data.createdAt);
 
           const msg: ChatMessage = {
             id: docSnap.id,
             roomId: data.roomId || roomId,
             text: data.text || '',
             sender: {
-              uid: rawSender.uid || data.senderId || 'unknown',
+              uid: senderUid,
               displayName: rawSender.displayName || rawSender.username || 'Anonymous',
               photoURL: rawSender.photoURL || rawSender.avatar || null,
               isAnonymous: Boolean(rawSender.isAnonymous)
             },
             timestamp: ts,
+            serverTimestamp: messageServerTimestamp || undefined,
             status,
+            isRead: isDirectMessage
+              && senderUid === currentUser.uid
+              && peerReadAtRef.current > 0
+              && (messageServerTimestamp || ts) <= peerReadAtRef.current,
             attachment: normalizedAttachment,
             reactions: data.reactions || {},
             replyTo: data.replyTo || null,
@@ -322,7 +376,12 @@ export function useMessages(
           (m) => m.roomId === roomId && m.sender.uid === currentUser.uid
         );
 
-        const merged = dedupeMessages([...remoteList, ...remainingOptimistic]);
+        const merged = applyPeerReadReceipt(
+          dedupeMessages([...remoteList, ...remainingOptimistic]),
+          currentUser.uid,
+          peerReadAtRef.current,
+          isDirectMessage
+        );
 
         setMessages(merged);
         setInitialLoading(false);
@@ -347,6 +406,7 @@ export function useMessages(
     return () => {
       isCurrentRoom = false;
       if (unsubscribe) unsubscribe();
+      if (unsubscribeReadReceipts) unsubscribeReadReceipts();
     };
   }, [roomId, currentUser?.uid, onAudioReceived]);
 

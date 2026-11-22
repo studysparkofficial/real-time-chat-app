@@ -68,7 +68,9 @@ export interface ChatMessage {
     isAnonymous?: boolean;
   };
   timestamp: number;
+  serverTimestamp?: number;
   status: MessageDeliveryStatus;
+  isRead?: boolean;
   attachment?: MessageAttachment | null;
   reactions?: Record<string, string[]>; // emoji -> array of uids
   replyTo?: MessageReplyReference | null;

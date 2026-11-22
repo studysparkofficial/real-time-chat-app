@@ -15,6 +15,7 @@ import {
 import { ChatMessage, ChatUser } from '../../types/chat.types';
 import { Avatar } from '../common/Avatar';
 import { renderMarkdownToSafeHtml } from '../../services/sanitize';
+import { isDirectConversationId } from '../../services/directMessages';
 import {
   extractKeyFromS3Url,
   formatBytes,
@@ -73,6 +74,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [showReactionPicker, setShowReactionPicker] = useState(false);
 
   const isOutgoing = currentUser ? message.sender.uid === currentUser.uid : false;
+  const isDirectMessage = isDirectConversationId(message.roomId);
   const senderColor = getSenderColor(message.sender.displayName || 'Scholar');
 
   // Local previews are session-only. Anything stored from S3 must be a GetObject
@@ -278,6 +280,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       return (
         <span title="Sending to JNUverse…" className="status-tick">
           <Clock size={14} />
+        </span>
+      );
+    }
+    if (isDirectMessage && (message.status === 'sent' || message.status === 'delivered')) {
+      return message.isRead ? (
+        <span title="Read" className="status-tick delivered">
+          <CheckCheck size={16} />
+        </span>
+      ) : (
+        <span title="Sent" className="status-tick direct-sent">
+          <Check size={15} />
         </span>
       );
     }

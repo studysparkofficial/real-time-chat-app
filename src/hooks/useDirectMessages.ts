@@ -7,7 +7,7 @@ import {
   query,
   runTransaction,
   serverTimestamp,
-  setDoc,
+  writeBatch,
   where
 } from '../services/firebase';
 import { ChatUser, DirectConversation } from '../types/chat.types';
@@ -144,11 +144,18 @@ export function useDirectMessages(currentUser: ChatUser | null) {
     const readAt = Date.now();
     setLastReadAt((previous) => ({ ...previous, [conversationId]: readAt }));
     try {
-      await setDoc(
+      const batch = writeBatch(db);
+      batch.set(
         doc(db, `user_private/${currentUser.uid}/dm_state`, conversationId),
         { lastReadAt: serverTimestamp() },
         { merge: true }
       );
+      batch.set(
+        doc(db, `rooms/${conversationId}/read_receipts`, currentUser.uid),
+        { lastReadAt: serverTimestamp() },
+        { merge: true }
+      );
+      await batch.commit();
     } catch (error) {
       console.warn('[Direct messages] Could not save read state:', error);
     }

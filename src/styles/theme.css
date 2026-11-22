@@ -455,6 +455,10 @@ input, textarea, select, button {
   color: #38bdf8;
 }
 
+.status-tick.direct-sent {
+  color: #94a3b8;
+}
+
 /* Docked WhatsApp-Style Pill Input Bar - Enlarged for Android touch */
 .input-bar-container {
   padding: 10px 16px 16px 16px;
@@ -489,6 +493,7 @@ input, textarea, select, button {
 
 .pill-textarea {
   flex: 1;
+  min-width: 0;
   background: transparent;
   border: none;
   outline: none;
@@ -496,9 +501,11 @@ input, textarea, select, button {
   max-height: 140px;
   min-height: 28px;
   padding: 4px 0;
-  font-size: 16px !important;
+  /* Stay clearly above iOS Safari's auto-zoom threshold when the composer is focused. */
+  font-size: 17px !important;
   line-height: 1.45;
   color: var(--text-primary);
+  -webkit-text-size-adjust: 100%;
 }
 
 /* iOS Safari zooms form controls below 16px on focus, even through component styles. */

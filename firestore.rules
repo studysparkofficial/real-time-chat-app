@@ -136,6 +136,18 @@ service cloud.firestore {
       allow write: if canReadRoomMessages(roomId) && request.auth.uid == userKey;
     }
 
+    // Only direct-chat participants can see receipts. Each participant may
+    // publish only their own last-read marker.
+    match /rooms/{roomId}/read_receipts/{userKey} {
+      allow read: if isDirectRoomMember(roomId);
+      allow create, update: if isDirectRoomMember(roomId)
+        && request.auth.uid == userKey
+        && request.resource.data.keys().hasOnly(['lastReadAt'])
+        && request.resource.data.lastReadAt is timestamp
+        && request.resource.data.lastReadAt == request.time;
+      allow delete: if false;
+    }
+
     // Per-user read state is private and synced across the user's devices.
     match /user_private/{uid}/dm_state/{conversationId} {
       allow read: if isOwner(uid) && isDirectRoomMember(conversationId);
