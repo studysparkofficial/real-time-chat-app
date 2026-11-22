@@ -10,18 +10,25 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == uid;
     }
 
-    // Message validation helpers
+    // Message validation helpers.
+    // Missing fields must be checked with keys() first. Reading a field that
+    // was not written (for example text-only messages with no attachment)
+    // fails the whole rule and blocks send/receive.
     function isValidText(text) {
       return text == null || (text is string && text.size() <= 10000);
+    }
+
+    function hasField(data, field) {
+      return data.keys().hasAny([field]);
     }
 
     function isValidAttachment(att) {
       return att == null || (
         att.key is string
-        && (
-          (att.size is int && att.size > 0 && att.size <= 52428800) ||
-          (att.fileSize is int && att.fileSize > 0 && att.fileSize <= 52428800)
-        )
+        && att.key.size() > 0
+        && att.key.size() <= 1024
+        && (!hasField(att, 'size') || (att.size is int && att.size >= 0 && att.size <= 52428800))
+        && (!hasField(att, 'fileSize') || (att.fileSize is int && att.fileSize >= 0 && att.fileSize <= 52428800))
       );
     }
 
@@ -31,12 +38,16 @@ service cloud.firestore {
 
       // Creating a message: must be from the authenticated sender
       allow create: if isAuthenticated()
+        && hasField(request.resource.data, 'sender')
         && request.resource.data.sender.uid == request.auth.uid
-        && isValidText(request.resource.data.text)
-        && isValidAttachment(request.resource.data.attachment)
+        && (!hasField(request.resource.data, 'text') || isValidText(request.resource.data.text))
+        && (!hasField(request.resource.data, 'attachment') || isValidAttachment(request.resource.data.attachment))
         && (
-          (request.resource.data.text is string && request.resource.data.text.size() > 0) ||
-          (request.resource.data.attachment != null)
+          (hasField(request.resource.data, 'text')
+            && request.resource.data.text is string
+            && request.resource.data.text.size() > 0)
+          || (hasField(request.resource.data, 'attachment')
+            && request.resource.data.attachment != null)
         );
 
       // Updating a message: allows emoji reactions by any room member, or editing by owner

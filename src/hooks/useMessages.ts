@@ -3,7 +3,6 @@ import {
   db,
   collection,
   doc,
-  addDoc,
   setDoc,
   updateDoc,
   deleteDoc,
@@ -15,11 +14,119 @@ import {
 } from '../services/firebase';
 import { localCache } from '../services/indexedDbCache';
 import {
+  extractKeyFromS3Url,
+  inferAttachmentCategory,
+  isOpenableS3Url
+} from '../services/s3Service';
+import {
   ChatMessage,
   ChatUser,
   MessageAttachment,
   MessageReplyReference
 } from '../types/chat.types';
+
+function toMillis(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value && typeof value === 'object' && typeof (value as { toMillis?: () => number }).toMillis === 'function') {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  return 0;
+}
+
+function durableFileUrl(url?: string): string {
+  if (!url || url.startsWith('blob:') || url.startsWith('data:')) return '';
+  return isOpenableS3Url(url) ? url : '';
+}
+
+function normalizeAttachment(raw: Record<string, unknown> | null | undefined): MessageAttachment | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const fileName = String(raw.fileName || raw.name || 'attachment');
+  const mimeType = String(raw.mimeType || raw.type || 'application/octet-stream');
+  const size = Number(raw.fileSize || raw.size || 0);
+  const rawUrl = typeof raw.url === 'string' ? raw.url : undefined;
+  const rawDownloadUrl = typeof raw.downloadUrl === 'string' ? raw.downloadUrl : undefined;
+  const url = durableFileUrl(rawUrl) || durableFileUrl(rawDownloadUrl);
+  const key = (typeof raw.key === 'string' ? raw.key : '')
+    || extractKeyFromS3Url(rawUrl)
+    || extractKeyFromS3Url(rawDownloadUrl);
+  if (!key && !url) return null;
+  const category = (['image', 'video', 'audio', 'pdf', 'file'].includes(String(raw.category))
+    ? raw.category
+    : inferAttachmentCategory(mimeType, fileName)) as MessageAttachment['category'];
+  return {
+    key,
+    url,
+    downloadUrl: url,
+    fileName,
+    name: fileName,
+    fileSize: size,
+    size,
+    mimeType,
+    type: mimeType,
+    category
+  };
+}
+
+function storedAttachment(attachment: MessageAttachment): MessageAttachment {
+  const url = durableFileUrl(attachment.downloadUrl) || durableFileUrl(attachment.url);
+  const fileName = attachment.fileName || attachment.name || 'attachment';
+  const mimeType = attachment.mimeType || attachment.type || 'application/octet-stream';
+  const size = attachment.fileSize || attachment.size || 0;
+  return {
+    key: attachment.key || extractKeyFromS3Url(attachment.url) || extractKeyFromS3Url(attachment.downloadUrl),
+    url,
+    downloadUrl: url,
+    fileName,
+    name: attachment.name || fileName,
+    fileSize: size,
+    size,
+    mimeType,
+    type: attachment.type || mimeType,
+    category: attachment.category || inferAttachmentCategory(mimeType, fileName)
+  };
+}
+
+function firestoreMessagePayload(message: ChatMessage): Record<string, unknown> {
+  return {
+    text: message.text,
+    sender: {
+      uid: message.sender.uid,
+      displayName: message.sender.displayName || 'Scholar',
+      photoURL: message.sender.photoURL || null,
+      isAnonymous: Boolean(message.sender.isAnonymous)
+    },
+    timestamp: message.timestamp,
+    createdAt: serverTimestamp(),
+    reactions: message.reactions || {},
+    clientTempId: message.clientTempId || message.id,
+    attachment: message.attachment?.key ? storedAttachment(message.attachment) : null,
+    replyTo: message.replyTo || null
+  };
+}
+
+async function persistMessage(message: ChatMessage): Promise<void> {
+  const messageId = `msg_${message.clientTempId || message.id}`;
+  const messageRef = doc(db, `rooms/${message.roomId}/messages`, messageId);
+  await setDoc(messageRef, firestoreMessagePayload(message));
+}
+
+function dedupeMessages(list: ChatMessage[]): ChatMessage[] {
+  const byKey = new Map<string, ChatMessage>();
+  for (const msg of list) {
+    const key = msg.clientTempId || msg.id;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, msg);
+      continue;
+    }
+    const existingIsLocal = Boolean(existing.isOptimistic);
+    const incomingIsLocal = Boolean(msg.isOptimistic);
+    if (existingIsLocal && !incomingIsLocal) byKey.set(key, msg);
+    else if (!existingIsLocal && incomingIsLocal) byKey.set(key, existing);
+    else byKey.set(key, msg);
+  }
+  return Array.from(byKey.values()).sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+}
 
 export function useMessages(
   roomId: string,
@@ -38,12 +145,10 @@ export function useMessages(
   const optimisticMapRef = useRef<Map<string, ChatMessage>>(new Map());
   const hasMountedRef = useRef(false);
 
-  // Monitor online / offline network state
+  // Monitor online / offline network state. Outbox flushing is handled below so
+  // it always uses the current room and authenticated user.
   useEffect(() => {
-    const handleOnline = () => {
-      setIsOnline(true);
-      flushOutbox();
-    };
+    const handleOnline = () => setIsOnline(true);
     const handleOffline = () => {
       setIsOnline(false);
     };
@@ -55,7 +160,7 @@ export function useMessages(
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [roomId]);
+  }, []);
 
   // Flush queued outbox messages upon reconnect
   const flushOutbox = useCallback(async () => {
@@ -63,25 +168,18 @@ export function useMessages(
     if (pending.length === 0) return;
 
     for (const msg of pending) {
-      if (msg.roomId === roomId && currentUser) {
+      if (currentUser && msg.sender.uid === currentUser.uid) {
         try {
-          const colRef = collection(db, `rooms/${roomId}/messages`);
-          await addDoc(colRef, {
-            text: msg.text,
-            sender: msg.sender,
-            timestamp: serverTimestamp(),
-            attachment: msg.attachment || null,
-            reactions: msg.reactions || {},
-            replyTo: msg.replyTo || null,
-            clientTempId: msg.clientTempId
-          });
+          await persistMessage(msg);
 
           await localCache.removeFromOutbox(msg.clientTempId!);
           optimisticMapRef.current.delete(msg.clientTempId!);
 
           setMessages((prev) =>
             prev.map((m) =>
-              m.clientTempId === msg.clientTempId ? { ...m, status: 'sent' } : m
+              m.clientTempId === msg.clientTempId && m.status !== 'delivered'
+                ? { ...m, status: 'sent' }
+                : m
             )
           );
         } catch {
@@ -89,25 +187,44 @@ export function useMessages(
         }
       }
     }
-  }, [roomId, currentUser]);
+  }, [currentUser]);
 
-  // Cold Boot from IndexedDB Cache (< 50ms) + Real-time Firestore Stream
   useEffect(() => {
+    if (isOnline && currentUser) void flushOutbox();
+  }, [isOnline, currentUser, flushOutbox]);
+
+  // Cold Boot from IndexedDB Cache (< 50ms) + Real-time Firestore Stream.
+  // The listener is created only after sign-in. Starting it earlier is denied by
+  // security rules and Firestore does not retry that listener, so messages never arrive.
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setMessages([]);
+      setInitialLoading(false);
+      return;
+    }
+
     let unsubscribe: (() => void) | null = null;
     let isCurrentRoom = true;
+    hasMountedRef.current = false;
+    setMessages([]);
+    setInitialLoading(true);
 
     // 1. Instant cold boot from local IndexedDB cache
     localCache.getCachedMessages(roomId, 100).then((cached) => {
       if (!isCurrentRoom) return;
       if (cached && cached.length > 0) {
-        setMessages(cached);
+        const pendingLocal = Array.from(optimisticMapRef.current.values()).filter(
+          (message) => message.roomId === roomId && message.sender.uid === currentUser.uid
+        );
+        setMessages(dedupeMessages([...cached, ...pendingLocal]));
         setInitialLoading(false);
       }
     });
 
     // 2. Real-time Firestore listener with metadata changes enabled
     const messagesRef = collection(db, `rooms/${roomId}/messages`);
-    const q = query(messagesRef, orderBy('timestamp', 'asc'), limit(150));
+    // Read the newest page, then reverse it for the ascending chat timeline.
+    const q = query(messagesRef, orderBy('timestamp', 'desc'), limit(150));
 
     unsubscribe = onSnapshot(
       q,
@@ -117,68 +234,65 @@ export function useMessages(
 
         const remoteList: ChatMessage[] = [];
         let hasNewIncoming = false;
+        const newlyAddedIds = new Set(
+          snapshot.docChanges().filter((change) => change.type === 'added').map((change) => change.doc.id)
+        );
 
         snapshot.forEach((docSnap) => {
           const data = docSnap.data();
           const docMetadata = docSnap.metadata;
 
-          // Convert timestamp
-          let ts = Date.now();
-          if (data.timestamp) {
-            if (typeof data.timestamp.toMillis === 'function') {
-              ts = data.timestamp.toMillis();
-            } else if (typeof data.timestamp === 'number') {
-              ts = data.timestamp;
-            }
-          }
+          // Legacy messages stored a numeric timestamp; newer writes may use a
+          // Firestore Timestamp on timestamp or createdAt.
+          const ts = toMillis(data.timestamp) || toMillis(data.createdAt) || Date.now();
 
-          // Determine delivery status
           // If Firestore is still uploading local writes, status is 'sent' (single check)
           // Once synced to cloud server without pending writes, it's 'delivered' (double check)
           const isPending = docMetadata.hasPendingWrites;
           const status: ChatMessage['status'] = isPending ? 'sent' : 'delivered';
 
-          const rawAttachment = data.attachment;
-          let normalizedAttachment: MessageAttachment | null = null;
-          if (rawAttachment) {
-            normalizedAttachment = {
-              key: rawAttachment.key || '',
-              url: rawAttachment.url || rawAttachment.downloadUrl || '',
-              downloadUrl: rawAttachment.downloadUrl || rawAttachment.url || '',
-              fileName: rawAttachment.fileName || rawAttachment.name || 'attachment',
-              name: rawAttachment.name || rawAttachment.fileName || 'attachment',
-              fileSize: rawAttachment.fileSize || rawAttachment.size || 0,
-              size: rawAttachment.size || rawAttachment.fileSize || 0,
-              mimeType: rawAttachment.mimeType || rawAttachment.type || 'application/octet-stream',
-              type: rawAttachment.type || rawAttachment.mimeType || 'application/octet-stream',
-              category: rawAttachment.category || 'file'
-            };
-          }
+          const rawSender = (data.sender || {}) as {
+            uid?: string;
+            displayName?: string;
+            username?: string;
+            photoURL?: string | null;
+            avatar?: string | null;
+            isAnonymous?: boolean;
+          };
+          const normalizedAttachment = normalizeAttachment(data.attachment);
 
           const msg: ChatMessage = {
             id: docSnap.id,
-            roomId,
+            roomId: data.roomId || roomId,
             text: data.text || '',
-            sender: data.sender || { uid: 'unknown', displayName: 'Anonymous' },
+            sender: {
+              uid: rawSender.uid || data.senderId || 'unknown',
+              displayName: rawSender.displayName || rawSender.username || 'Anonymous',
+              photoURL: rawSender.photoURL || rawSender.avatar || null,
+              isAnonymous: Boolean(rawSender.isAnonymous)
+            },
             timestamp: ts,
             status,
             attachment: normalizedAttachment,
             reactions: data.reactions || {},
             replyTo: data.replyTo || null,
-            clientTempId: data.clientTempId
+            clientTempId: data.clientTempId || data.clientMsgId,
+            isOptimistic: false
           };
 
-          // If this message satisfies an optimistic message, clear it
-          if (data.clientTempId && optimisticMapRef.current.has(data.clientTempId)) {
-            optimisticMapRef.current.delete(data.clientTempId);
-            localCache.removeFromOutbox(data.clientTempId);
+          const tempId = data.clientTempId || data.clientMsgId;
+          if (tempId && optimisticMapRef.current.has(tempId) && !docMetadata.hasPendingWrites) {
+            optimisticMapRef.current.delete(tempId);
+            localCache.removeFromOutbox(tempId);
           }
 
           // Check if it's an incoming message from someone else
           if (
             hasMountedRef.current &&
             currentUser &&
-            data.sender?.uid !== currentUser.uid &&
+            !snapshot.metadata.fromCache &&
+            newlyAddedIds.has(docSnap.id) &&
+            (rawSender.uid || data.senderId) !== currentUser.uid &&
             !docMetadata.fromCache
           ) {
             hasNewIncoming = true;
@@ -187,14 +301,14 @@ export function useMessages(
           remoteList.push(msg);
         });
 
+        remoteList.reverse();
+
         // Merge any remaining optimistic messages that haven't hit the listener yet
         const remainingOptimistic = Array.from(optimisticMapRef.current.values()).filter(
-          (m) => m.roomId === roomId
+          (m) => m.roomId === roomId && m.sender.uid === currentUser.uid
         );
 
-        const merged = [...remoteList, ...remainingOptimistic].sort(
-          (a, b) => (a.timestamp || 0) - (b.timestamp || 0)
-        );
+        const merged = dedupeMessages([...remoteList, ...remainingOptimistic]);
 
         setMessages(merged);
         setInitialLoading(false);
@@ -208,7 +322,7 @@ export function useMessages(
           onAudioReceived();
         }
 
-        hasMountedRef.current = true;
+        if (!snapshot.metadata.fromCache) hasMountedRef.current = true;
       },
       (error) => {
         console.warn(`[Firestore] Messages stream subscription error in #${roomId}:`, error);
@@ -220,9 +334,9 @@ export function useMessages(
       isCurrentRoom = false;
       if (unsubscribe) unsubscribe();
     };
-  }, [roomId]);
+  }, [roomId, currentUser?.uid, onAudioReceived]);
 
-  // Send Message with Optimistic UI & Offline Outbox Queueing
+  // Send a text or already-uploaded attachment with optimistic UI and outbox queueing.
   const sendMessage = useCallback(
     async (
       text: string,
@@ -234,7 +348,7 @@ export function useMessages(
 
       const clientTempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
       const optimisticMsg: ChatMessage = {
-        id: clientTempId,
+        id: `msg_${clientTempId}`,
         roomId,
         text: text.trim(),
         sender: {
@@ -248,7 +362,8 @@ export function useMessages(
         attachment: attachment || null,
         reactions: {},
         replyTo: replyTo || null,
-        clientTempId
+        clientTempId,
+        isOptimistic: true
       };
 
       // 1. Immediately render message in UI (Zero lag)
@@ -262,54 +377,21 @@ export function useMessages(
       // 3. Queue in IndexedDB Outbox
       await localCache.enqueueOutbox(optimisticMsg);
 
-      // 4. If offline, keep in 'sending' or 'failed' until online
-      if (!navigator.onLine) {
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.clientTempId === clientTempId ? { ...m, status: 'sending' } : m
-          )
-        );
+      // 4. If offline, keep it in the outbox until the connection returns.
+      if (!isOnline) {
         return;
       }
 
-      // 5. Commit to Firestore
       try {
-        const colRef = collection(db, `rooms/${roomId}/messages`);
-        const payload: Record<string, unknown> = {
-          text: optimisticMsg.text,
-          sender: optimisticMsg.sender,
-          timestamp: serverTimestamp(),
-          reactions: {},
-          clientTempId
-        };
-        if (attachment) {
-          const cleanUrl = (attachment.downloadUrl && !attachment.downloadUrl.startsWith('blob:'))
-            ? attachment.downloadUrl
-            : (attachment.url && !attachment.url.startsWith('blob:'))
-            ? attachment.url
-            : '';
-
-          payload.attachment = {
-            key: attachment.key,
-            url: cleanUrl,
-            downloadUrl: cleanUrl,
-            fileName: attachment.fileName || attachment.name || 'attachment',
-            name: attachment.name || attachment.fileName || 'attachment',
-            fileSize: attachment.fileSize || attachment.size || 0,
-            size: attachment.size || attachment.fileSize || 0,
-            mimeType: attachment.mimeType || attachment.type || 'application/octet-stream',
-            type: attachment.type || attachment.mimeType || 'application/octet-stream',
-            category: attachment.category || 'file'
-          };
-        }
-        if (replyTo) payload.replyTo = replyTo;
-
-        await addDoc(colRef, payload);
+        await persistMessage(optimisticMsg);
+        await localCache.removeFromOutbox(clientTempId);
 
         // Update optimistic item to 'sent' (✓) until remote confirms 'delivered' (✓✓)
         setMessages((prev) =>
           prev.map((m) =>
-            m.clientTempId === clientTempId ? { ...m, status: 'sent' } : m
+            m.clientTempId === clientTempId && m.status !== 'delivered'
+              ? { ...m, status: 'sent' }
+              : m
           )
         );
       } catch (err: unknown) {
@@ -327,14 +409,134 @@ export function useMessages(
         );
       }
     },
+    [roomId, currentUser, isOnline, onAudioSent, onHaptic]
+  );
+
+  // Show a file message immediately, then let S3 upload and Firestore delivery
+  // finish in the background while the composer remains available.
+  const beginAttachmentUpload = useCallback(
+    (
+      text: string,
+      attachment: MessageAttachment,
+      replyTo?: MessageReplyReference | null
+    ): string | null => {
+      if (!currentUser) return null;
+
+      const clientTempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+      const optimisticMsg: ChatMessage = {
+        id: `msg_${clientTempId}`,
+        roomId,
+        text: text.trim(),
+        sender: {
+          uid: currentUser.uid,
+          displayName: currentUser.displayName,
+          photoURL: currentUser.photoURL,
+          isAnonymous: currentUser.isAnonymous
+        },
+        timestamp: Date.now(),
+        status: 'sending',
+        attachment: { ...attachment, uploadState: 'uploading', uploadProgress: 0, retryAvailable: true },
+        reactions: {},
+        replyTo: replyTo || null,
+        clientTempId,
+        isOptimistic: true
+      };
+
+      optimisticMapRef.current.set(clientTempId, optimisticMsg);
+      setMessages((prev) => dedupeMessages([...prev, optimisticMsg]));
+      if (onAudioSent) onAudioSent();
+      if (onHaptic) onHaptic();
+      return clientTempId;
+    },
     [roomId, currentUser, onAudioSent, onHaptic]
   );
 
-  // 1-Tap Retry for Failed Messages
+  const updateAttachmentUploadProgress = useCallback((clientTempId: string, progress: number) => {
+    const msg = optimisticMapRef.current.get(clientTempId);
+    if (!msg?.attachment) return;
+    const updated: ChatMessage = {
+      ...msg,
+      attachment: { ...msg.attachment, uploadProgress: Math.max(0, Math.min(100, progress)) }
+    };
+    optimisticMapRef.current.set(clientTempId, updated);
+    setMessages((prev) => prev.map((item) => item.clientTempId === clientTempId ? updated : item));
+  }, []);
+
+  const completeAttachmentUpload = useCallback(
+    async (clientTempId: string, attachment: MessageAttachment) => {
+      const previous = optimisticMapRef.current.get(clientTempId);
+      if (!previous) return;
+
+      const completed: ChatMessage = {
+        ...previous,
+        attachment: { ...attachment, uploadState: undefined, uploadProgress: undefined },
+        status: 'sending',
+        errorMessage: undefined
+      };
+      optimisticMapRef.current.set(clientTempId, completed);
+      setMessages((prev) => prev.map((item) => item.clientTempId === clientTempId ? completed : item));
+      await localCache.enqueueOutbox(completed);
+
+      if (!isOnline) {
+        return;
+      }
+
+      try {
+        await persistMessage(completed);
+        await localCache.removeFromOutbox(clientTempId);
+        setMessages((prev) => prev.map((item) =>
+          item.clientTempId === clientTempId && item.status !== 'delivered'
+            ? { ...item, status: 'sent' }
+            : item
+        ));
+      } catch (err: unknown) {
+        const error = err as Error;
+        const failed = { ...completed, status: 'failed' as const, errorMessage: error.message || 'Failed to send attachment message' };
+        optimisticMapRef.current.set(clientTempId, failed);
+        setMessages((prev) => prev.map((item) => item.clientTempId === clientTempId ? failed : item));
+      }
+    },
+    [isOnline]
+  );
+
+  const failAttachmentUpload = useCallback((clientTempId: string, errorMessage: string) => {
+    const msg = optimisticMapRef.current.get(clientTempId);
+    if (!msg) return;
+    const failed: ChatMessage = {
+      ...msg,
+      status: 'failed',
+      errorMessage,
+      attachment: msg.attachment
+        ? { ...msg.attachment, uploadState: 'failed', uploadProgress: undefined }
+        : null
+    };
+    optimisticMapRef.current.set(clientTempId, failed);
+    setMessages((prev) => prev.map((item) => item.clientTempId === clientTempId ? failed : item));
+  }, []);
+
+  const retryAttachmentUpload = useCallback((clientTempId: string) => {
+    const msg = optimisticMapRef.current.get(clientTempId);
+    if (!msg?.attachment || msg.attachment.key) return;
+    const retrying: ChatMessage = {
+      ...msg,
+      status: 'sending',
+      errorMessage: undefined,
+      attachment: {
+        ...msg.attachment,
+        uploadState: 'uploading',
+        uploadProgress: 0
+      }
+    };
+    optimisticMapRef.current.set(clientTempId, retrying);
+    setMessages((prev) => prev.map((item) => item.clientTempId === clientTempId ? retrying : item));
+  }, []);
+
+  // Retry Firestore delivery for messages whose attachment has already uploaded.
   const retryMessage = useCallback(
     async (clientTempId: string) => {
       const msg = optimisticMapRef.current.get(clientTempId);
       if (!msg || !currentUser) return;
+      if (msg.attachment && !msg.attachment.key) return;
 
       // Update state to sending
       msg.status = 'sending';
@@ -346,22 +548,14 @@ export function useMessages(
       );
 
       try {
-        const colRef = collection(db, `rooms/${roomId}/messages`);
-        const payload: Record<string, unknown> = {
-          text: msg.text,
-          sender: msg.sender,
-          timestamp: serverTimestamp(),
-          reactions: msg.reactions || {},
-          clientTempId
-        };
-        if (msg.attachment) payload.attachment = msg.attachment;
-        if (msg.replyTo) payload.replyTo = msg.replyTo;
-
-        await addDoc(colRef, payload);
+        await persistMessage(msg);
+        await localCache.removeFromOutbox(clientTempId);
 
         setMessages((prev) =>
           prev.map((m) =>
-            m.clientTempId === clientTempId ? { ...m, status: 'sent' } : m
+            m.clientTempId === clientTempId && m.status !== 'delivered'
+              ? { ...m, status: 'sent' }
+              : m
           )
         );
       } catch (err: unknown) {
@@ -375,7 +569,7 @@ export function useMessages(
         );
       }
     },
-    [roomId, currentUser]
+    [currentUser]
   );
 
   // Interactive Emoji Reactions
@@ -383,7 +577,7 @@ export function useMessages(
     async (messageId: string, emoji: string) => {
       if (!currentUser) return;
       const msg = messages.find((m) => m.id === messageId);
-      if (!msg) return;
+      if (!msg || msg.status === 'sending' || msg.status === 'failed') return;
 
       const reactions = { ...(msg.reactions || {}) };
       const currentList = reactions[emoji] || [];
@@ -418,6 +612,8 @@ export function useMessages(
   const deleteMessage = useCallback(
     async (messageId: string) => {
       if (!currentUser) return;
+      const message = messages.find((item) => item.id === messageId);
+      if (!message || message.status === 'sending' || message.status === 'failed') return;
       try {
         const msgRef = doc(db, `rooms/${roomId}/messages`, messageId);
         await deleteDoc(msgRef);
@@ -426,7 +622,7 @@ export function useMessages(
         console.error('[Messages] Delete message error:', err);
       }
     },
-    [roomId, currentUser]
+    [roomId, currentUser, messages]
   );
 
   return {
@@ -434,6 +630,11 @@ export function useMessages(
     isOnline,
     initialLoading,
     sendMessage,
+    beginAttachmentUpload,
+    updateAttachmentUploadProgress,
+    completeAttachmentUpload,
+    failAttachmentUpload,
+    retryAttachmentUpload,
     retryMessage,
     toggleReaction,
     deleteMessage

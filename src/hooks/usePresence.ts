@@ -82,8 +82,10 @@ export function usePresence(currentUser: ChatUser | null, activeRoomId: string) 
     };
   }, [currentUser]);
 
-  // Subscribe to all online users
+  // Subscribe to all online users once the signed-in user can pass security rules
   useEffect(() => {
+    if (!currentUser?.uid) return;
+
     const q = collection(db, 'online_users');
     const unsubscribe = onSnapshot(
       q,
@@ -106,11 +108,11 @@ export function usePresence(currentUser: ChatUser | null, activeRoomId: string) 
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [currentUser?.uid]);
 
   // Subscribe to room typing indicators
   useEffect(() => {
-    if (!activeRoomId) return;
+    if (!activeRoomId || !currentUser?.uid) return;
 
     const typingCol = collection(db, `rooms/${activeRoomId}/typing`);
     const unsubscribe = onSnapshot(

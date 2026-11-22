@@ -34,7 +34,6 @@ interface AppLayoutProps {
   onSetReplyTo: (ref: MessageReplyReference | null) => void;
   stagedFile: File | null;
   stagedPreview: string | null;
-  uploadProgress: number;
   isUploading: boolean;
   uploadError: string | null;
   isRecording: boolean;
@@ -80,7 +79,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onSetReplyTo,
   stagedFile,
   stagedPreview,
-  uploadProgress,
   isUploading,
   uploadError,
   isRecording,
@@ -201,7 +199,6 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           onCancelReply={() => onSetReplyTo(null)}
           stagedFile={stagedFile}
           stagedPreview={stagedPreview}
-          uploadProgress={uploadProgress}
           isUploading={isUploading}
           uploadError={uploadError}
           isRecording={isRecording}

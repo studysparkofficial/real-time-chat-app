@@ -7,7 +7,6 @@ import {
   Send,
   X,
   StopCircle,
-  Loader2,
   Trash2,
   Image as ImageIcon
 } from 'lucide-react';
@@ -21,7 +20,6 @@ interface ChatInputBarProps {
   onCancelReply: () => void;
   stagedFile: File | null;
   stagedPreview: string | null;
-  uploadProgress: number;
   isUploading: boolean;
   uploadError: string | null;
   isRecording: boolean;
@@ -43,7 +41,6 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   onCancelReply,
   stagedFile,
   stagedPreview,
-  uploadProgress,
   isUploading,
   uploadError,
   isRecording,
@@ -81,7 +78,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   };
 
   const handleSend = async () => {
-    if ((!text.trim() && !stagedFile) || isUploading) return;
+    if (!text.trim() && !stagedFile) return;
     const currentText = text;
     setText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -262,45 +259,21 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
               {formatBytes(stagedFile.size)}
             </div>
 
-            {/* Upload progress indicator */}
-            {isUploading && (
-              <div
-                style={{
-                  width: '100%',
-                  height: '5px',
-                  background: 'rgba(255,255,255,0.12)',
-                  borderRadius: '3px',
-                  marginTop: '6px',
-                  overflow: 'hidden'
-                }}
-              >
-                <div
-                  style={{
-                    height: '100%',
-                    width: `${uploadProgress}%`,
-                    background: 'var(--accent-primary)',
-                    transition: 'width 0.2s ease'
-                  }}
-                />
-              </div>
-            )}
           </div>
 
-          {!isUploading && (
-            <button
-              type="button"
-              onClick={onClearStagedFile}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
-                padding: '6px'
-              }}
-            >
-              <X size={20} />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onClearStagedFile}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              padding: '6px'
+            }}
+          >
+            <X size={20} />
+          </button>
         </div>
       )}
 
@@ -450,16 +423,12 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         <button
           type="button"
           onClick={handleSend}
-          disabled={(!text.trim() && !stagedFile) || isUploading}
+          disabled={!text.trim() && !stagedFile}
           className="send-round-btn"
-          title="Send to JNUverse"
+          title={isUploading ? 'Send to JNUverse (file uploads continue in the background)' : 'Send to JNUverse'}
           aria-label="Send Message"
         >
-          {isUploading ? (
-            <Loader2 size={24} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
-          ) : (
-            <Send size={22} style={{ marginLeft: '2px' }} />
-          )}
+          <Send size={22} style={{ marginLeft: '2px' }} />
         </button>
       </div>
     </div>

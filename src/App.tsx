@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AppLayout } from './components/layout/AppLayout';
 import { AuthModal } from './components/modals/AuthModal';
 import { AccountModal } from './components/modals/AccountModal';
@@ -16,7 +16,8 @@ import { useHaptics } from './hooks/useHaptics';
 
 import { db, collection, addDoc, onSnapshot } from './services/firebase';
 import { localCache } from './services/indexedDbCache';
-import { ChatRoom, MessageReplyReference } from './types/chat.types';
+import { validateAttachment } from './services/s3Service';
+import { ChatRoom, MessageAttachment, MessageReplyReference } from './types/chat.types';
 
 // Official JNU Campus Channels
 const JNU_DEFAULT_ROOMS: ChatRoom[] = [
@@ -132,8 +133,11 @@ export const App: React.FC = () => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Sync custom channels from Firestore & cache in IndexedDB
+  // Sync custom channels from Firestore & cache in IndexedDB.
+  // Wait for auth — an early listener is rejected and does not reconnect.
   useEffect(() => {
+    if (!currentUser?.uid) return;
+
     localCache.getCachedRooms().then((cached) => {
       if (cached && cached.length > 0) {
         setRooms(cached);
@@ -163,7 +167,7 @@ export const App: React.FC = () => {
     );
 
     return () => unsub();
-  }, []);
+  }, [currentUser?.uid]);
 
   // Active Room Definition
   const activeRoom = useMemo(() => {
@@ -193,6 +197,11 @@ export const App: React.FC = () => {
     isOnline,
     initialLoading,
     sendMessage,
+    beginAttachmentUpload,
+    updateAttachmentUploadProgress,
+    completeAttachmentUpload,
+    failAttachmentUpload,
+    retryAttachmentUpload,
     retryMessage,
     toggleReaction,
     deleteMessage
@@ -208,7 +217,6 @@ export const App: React.FC = () => {
   const {
     stagedFile,
     stagedPreview,
-    uploadProgress,
     isUploading,
     uploadError,
     isRecording,
@@ -222,7 +230,44 @@ export const App: React.FC = () => {
     uploadCurrentAttachment
   } = useAttachments();
 
-  // Send message handler (combines text + uploaded media with zero-failure fallback)
+  const pendingUploadFilesRef = useRef<Map<string, File>>(new Map());
+
+  const startBackgroundUpload = useCallback(
+    (clientTempId: string, file: File) => {
+      pendingUploadFilesRef.current.set(clientTempId, file);
+      void uploadCurrentAttachment(file, (progress) => {
+        updateAttachmentUploadProgress(clientTempId, progress);
+      })
+        .then((attachment) => {
+          pendingUploadFilesRef.current.delete(clientTempId);
+          return completeAttachmentUpload(clientTempId, attachment);
+        })
+        .catch((uploadErr: unknown) => {
+          const message = uploadErr instanceof Error ? uploadErr.message : 'File upload failed';
+          console.error('[Upload] S3 upload failed:', uploadErr);
+          failAttachmentUpload(clientTempId, `Upload failed: ${message}. Select the file again to retry.`);
+          addToast(message, 'error');
+        });
+    },
+    [uploadCurrentAttachment, updateAttachmentUploadProgress, completeAttachmentUpload, failAttachmentUpload, addToast]
+  );
+
+  const handleRetryMessage = useCallback(
+    (clientTempId: string) => {
+      const file = pendingUploadFilesRef.current.get(clientTempId);
+      if (!file) {
+        retryMessage(clientTempId);
+        return;
+      }
+      retryAttachmentUpload(clientTempId);
+      startBackgroundUpload(clientTempId, file);
+    },
+    [retryMessage, retryAttachmentUpload, startBackgroundUpload]
+  );
+
+  // File messages appear immediately and upload in the background. The input is
+  // cleared before the transfer starts, so the user can keep chatting or attach
+  // another file while this upload runs.
   const handleSendMessage = useCallback(
     async (text: string, file?: File | null) => {
       if (!currentUser) {
@@ -230,20 +275,45 @@ export const App: React.FC = () => {
         return;
       }
 
-      let attachment = null;
       if (file) {
-        try {
-          attachment = await uploadCurrentAttachment(file);
-        } catch (uploadErr) {
-          console.warn('[Upload] S3 upload issue:', uploadErr);
-          addToast('File processed with fallback. Sending to channel…', 'info');
+        const validation = validateAttachment(file);
+        if (!validation.valid || !validation.mimeType || !validation.category) {
+          addToast(validation.error || 'This file cannot be uploaded.', 'error');
+          return;
         }
+        const mimeType = validation.mimeType;
+        const pendingAttachment: MessageAttachment = {
+          key: '',
+          fileName: file.name,
+          name: file.name,
+          fileSize: file.size,
+          size: file.size,
+          mimeType,
+          type: mimeType,
+          category: validation.category,
+          uploadState: 'uploading',
+          uploadProgress: 0
+        };
+        const clientTempId = beginAttachmentUpload(text, pendingAttachment, replyTo);
+        clearStagedFile();
+        if (!clientTempId) return;
+
+        startBackgroundUpload(clientTempId, file);
+        return;
       }
 
-      await sendMessage(text, attachment, replyTo);
+      await sendMessage(text, null, replyTo);
       clearStagedFile();
     },
-    [currentUser, uploadCurrentAttachment, sendMessage, replyTo, clearStagedFile, addToast]
+    [
+      currentUser,
+      sendMessage,
+      replyTo,
+      clearStagedFile,
+      beginAttachmentUpload,
+      startBackgroundUpload,
+      addToast
+    ]
   );
 
   // Toggle Reaction with Haptic & Sound
@@ -358,7 +428,6 @@ export const App: React.FC = () => {
         onSetReplyTo={setReplyTo}
         stagedFile={stagedFile}
         stagedPreview={stagedPreview}
-        uploadProgress={uploadProgress}
         isUploading={isUploading}
         uploadError={uploadError}
         isRecording={isRecording}
@@ -369,7 +438,7 @@ export const App: React.FC = () => {
         onStartRecording={startRecording}
         onStopRecording={stopRecording}
         onCancelRecording={cancelRecording}
-        onRetryMessage={retryMessage}
+        onRetryMessage={handleRetryMessage}
         onReaction={handleToggleReaction}
         onDeleteMessage={deleteMessage}
         onImageClick={(url, name) => {

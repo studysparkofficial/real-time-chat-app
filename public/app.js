@@ -1312,6 +1312,11 @@ async function hydrateMessageAttachment(container, msg) {
   const attachment = msg.attachment;
   try {
     let url = attachment.previewUrl || attachment.data || null;
+    const looksUnopenable = typeof url === 'string' && (
+      url.includes('x-id=PutObject') ||
+      (url.includes('.amazonaws.com/') && !url.includes('X-Amz-Signature') && !url.includes('Signature='))
+    );
+    if (looksUnopenable) url = null;
     if (!url && attachment.key) {
       const user = auth.currentUser;
       if (!user) throw new Error('Sign in to view this attachment.');

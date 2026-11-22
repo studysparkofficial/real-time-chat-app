@@ -317,16 +317,17 @@ export async function getSecureDownloadUrl(roomId, messageId, key, idToken, user
     throw new Error(data.error || `Unable to load attachment (HTTP ${response?.status || 'network error'})`);
   }
 
-  if (!data.downloadUrl) {
-    throw new Error('Download URL was not generated.');
+  const downloadUrl = data.downloadUrl || data.getUrl || data.url;
+  if (!downloadUrl || String(downloadUrl).includes('x-id=PutObject')) {
+    throw new Error('Download URL was not generated. The storage link cannot be opened.');
   }
 
   // Cache download URL (expire 30s before presigned expiry)
   const ttl = (data.expiresIn || 300) * 1000;
   downloadUrlCache.set(cacheKey, {
-    url: data.downloadUrl,
+    url: downloadUrl,
     expiresAt: Date.now() + ttl
   });
 
-  return data.downloadUrl;
+  return downloadUrl;
 }

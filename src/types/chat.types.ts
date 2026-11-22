@@ -29,6 +29,9 @@ export interface MessageAttachment {
   category: 'image' | 'video' | 'pdf' | 'audio' | 'file';
   duration?: number;
   blurhash?: string;
+  uploadState?: 'uploading' | 'failed';
+  uploadProgress?: number;
+  retryAvailable?: boolean;
 }
 
 export interface MessageReplyReference {
@@ -53,6 +56,7 @@ export interface ChatMessage {
   reactions?: Record<string, string[]>; // emoji -> array of uids
   replyTo?: MessageReplyReference | null;
   clientTempId?: string;
+  isOptimistic?: boolean;
   errorMessage?: string;
 }
 

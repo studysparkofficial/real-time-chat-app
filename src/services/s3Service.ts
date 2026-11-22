@@ -23,6 +23,12 @@ const BLOCKED_EXTENSIONS = [
   'exe', 'bat', 'cmd', 'sh', 'bash', 'bin', 'msi', 'com', 'scr', 'vbs', 'ps1', 'jar', 'apk'
 ];
 
+const MIME_TYPES_BY_EXTENSION: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime',
+  m4a: 'audio/mp4', mp3: 'audio/mpeg', ogg: 'audio/ogg', pdf: 'application/pdf'
+};
+
 export interface FileValidationResult {
   valid: boolean;
   error?: string;
@@ -41,16 +47,8 @@ export function validateAttachment(file: File): FileValidationResult {
   }
 
   let mimeType = (file.type || '').toLowerCase();
-  if (!mimeType) {
-    if (ext === 'jpg' || ext === 'jpeg') mimeType = 'image/jpeg';
-    else if (ext === 'png') mimeType = 'image/png';
-    else if (ext === 'webp') mimeType = 'image/webp';
-    else if (ext === 'gif') mimeType = 'image/gif';
-    else if (ext === 'mp4') mimeType = 'video/mp4';
-    else if (ext === 'webm') mimeType = 'video/webm';
-    else if (ext === 'pdf') mimeType = 'application/pdf';
-    else if (ext === 'mp3') mimeType = 'audio/mpeg';
-    else if (ext === 'ogg') mimeType = 'audio/ogg';
+  if (!mimeType || mimeType === 'application/octet-stream') {
+    mimeType = MIME_TYPES_BY_EXTENSION[ext] || mimeType;
   }
 
   const spec = ALLOWED_MIME_TYPES[mimeType];
@@ -153,7 +151,7 @@ export function isUrlPresignedAndValid(url?: string): boolean {
 }
 
 /**
- * Convert file to base64 Data URL for zero-latency local preview and reliable rendering
+ * Convert file to base64 Data URL when a local preview is explicitly needed.
  */
 export async function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -164,87 +162,142 @@ export async function fileToDataUrl(file: File): Promise<string> {
   });
 }
 
+export function inferAttachmentCategory(
+  mimeType?: string,
+  fileName?: string
+): MessageAttachment['category'] {
+  const mime = (mimeType || '').toLowerCase();
+  const ext = (fileName || '').split('.').pop()?.toLowerCase() || '';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime === 'application/pdf') return 'pdf';
+  if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return 'image';
+  if (['mp4', 'mov'].includes(ext)) return 'video';
+  if (['mp3', 'ogg', 'm4a', 'wav'].includes(ext)) return 'audio';
+  if (ext === 'pdf') return 'pdf';
+  return 'file';
+}
+
+function contentTypeForKey(cleanKey: string): string {
+  const ext = (cleanKey.split('.').pop() || '').toLowerCase();
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'mp4') return 'video/mp4';
+  if (ext === 'webm') return 'video/webm';
+  if (ext === 'mov') return 'video/quicktime';
+  if (ext === 'mp3') return 'audio/mpeg';
+  if (ext === 'ogg') return 'audio/ogg';
+  if (ext === 'm4a') return 'audio/mp4';
+  if (ext === 'pdf') return 'application/pdf';
+  return 'application/octet-stream';
+}
+
+/** A URL that can be opened with GET. PutObject signatures always 403 on open. */
+export function isOpenableS3Url(url?: string): boolean {
+  if (!url) return false;
+  if (url.startsWith('data:') || url.startsWith('blob:')) return true;
+  if (url.includes('x-id=PutObject')) return false;
+  return isUrlPresignedAndValid(url);
+}
+
+function pickGetObjectUrl(data: Record<string, unknown>, uploadUrlToIgnore?: string): string {
+  const candidates = [data.downloadUrl, data.getUrl, data.signedUrl, data.url];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || !candidate) continue;
+    if (uploadUrlToIgnore && candidate === uploadUrlToIgnore) continue;
+    if (candidate.includes('x-id=PutObject')) continue;
+    if (isUrlPresignedAndValid(candidate)) return candidate;
+  }
+  return '';
+}
+
 /**
- * Fetch a valid signed GET download URL from API Gateway
- * Generates an AWS S3 URL with x-id=GetObject and X-Amz-Signature to prevent Access Denied errors!
+ * Fetch a valid signed GET download URL from API Gateway.
+ * Upload (PutObject) URLs are rejected — opening them returns S3 AccessDenied.
  */
 export async function getPresignedDownloadUrl(
   keyOrUrl: string,
   roomId: string = 'campus-central',
-  messageId: string = 'msg'
+  messageId: string = 'msg',
+  forceRefresh: boolean = false,
+  attachmentDetails?: { fileName?: string; mimeType?: string }
 ): Promise<string> {
   if (!keyOrUrl) return '';
 
   const cleanKey = extractKeyFromS3Url(keyOrUrl);
   if (!cleanKey) return '';
 
-  // Check cache (reuse if still valid with 60s buffer)
+  if (forceRefresh) {
+    downloadUrlCache.delete(cleanKey);
+  }
+
   const cached = downloadUrlCache.get(cleanKey);
-  if (cached && Date.now() < cached.expiresAt - 60000) {
+  if (cached && isOpenableS3Url(cached.url) && Date.now() < cached.expiresAt - 60000) {
     return cached.url;
   }
+  downloadUrlCache.delete(cleanKey);
 
   const user = auth.currentUser;
   let idToken = '';
   if (user) {
     try {
-      idToken = await user.getIdToken();
+      idToken = await user.getIdToken(forceRefresh);
     } catch {
-      // ignore
+      try {
+        idToken = await user.getIdToken();
+      } catch {
+        // unsigned request still attempted; API may allow it
+      }
     }
   }
 
-  const ext = (cleanKey.split('.').pop() || '').toLowerCase();
-  let contentType = 'application/octet-stream';
-  if (ext === 'jpg' || ext === 'jpeg') contentType = 'image/jpeg';
-  else if (ext === 'png') contentType = 'image/png';
-  else if (ext === 'webp') contentType = 'image/webp';
-  else if (ext === 'gif') contentType = 'image/gif';
-  else if (ext === 'mp4') contentType = 'video/mp4';
-  else if (ext === 'webm') contentType = 'video/webm';
-  else if (ext === 'pdf') contentType = 'application/pdf';
-
+  const fileName = attachmentDetails?.fileName || cleanKey.split('/').pop() || 'file';
   const payload = {
     action: 'download',
     key: cleanKey,
     roomId,
     messageId,
-    contentType,
-    fileName: cleanKey.split('/').pop() || 'file'
+    contentType: attachmentDetails?.mimeType || contentTypeForKey(cleanKey),
+    fileName,
+    disposition: 'inline'
   };
 
-  try {
-    const res = await fetch(`${API_BASE_URL}/upload-url`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
-      },
-      body: JSON.stringify(payload)
-    });
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (idToken) headers.Authorization = `Bearer ${idToken}`;
 
-    if (res.ok) {
-      const data = await res.json().catch(() => ({}));
-      const downloadUrl = data.downloadUrl || data.url;
-      if (downloadUrl) {
-        const expiresIn = (data.expiresIn || 900) * 1000;
-        downloadUrlCache.set(cleanKey, {
-          url: downloadUrl,
-          expiresAt: Date.now() + expiresIn
-        });
-        return downloadUrl;
-      }
+  // /download-url is the dedicated route. /upload-url dispatches on action=download
+  // when the dedicated route is not deployed.
+  for (const path of ['/download-url', '/upload-url']) {
+    try {
+      const res = await fetch(`${API_BASE_URL}${path}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) continue;
+      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const downloadUrl = pickGetObjectUrl(data);
+      if (!downloadUrl) continue;
+      const expiresInSec = typeof data.expiresIn === 'number' ? data.expiresIn : 900;
+      downloadUrlCache.set(cleanKey, {
+        url: downloadUrl,
+        expiresAt: Date.now() + expiresInSec * 1000
+      });
+      return downloadUrl;
+    } catch (err) {
+      console.warn(`[DownloadUrl] ${path} failed:`, err);
     }
-  } catch (err) {
-    console.warn('[DownloadUrl] Failed to get signed download URL from API Gateway:', err);
   }
 
   return '';
 }
 
 /**
- * Upload to AWS S3 via API Gateway Presigned PUT / POST pipeline
- * Always pairs the upload with a signed GetObject download URL to prevent S3 Access Denied errors.
+ * Upload to AWS S3 via API Gateway Presigned PUT / POST pipeline.
+ * The message viewer requests a signed GetObject URL after the Firestore message is saved.
  */
 export async function uploadToS3(
   file: File,
@@ -256,29 +309,17 @@ export async function uploadToS3(
   }
 
   const user = auth.currentUser;
-  const uid = user ? user.uid : `guest_${Date.now()}`;
+  if (!user) {
+    throw new Error('Your sign-in session is not ready. Please sign in again before uploading.');
+  }
   let idToken = '';
-  if (user) {
-    try {
-      idToken = await user.getIdToken();
-    } catch {
-      // ignore
-    }
+  try {
+    idToken = await user.getIdToken();
+  } catch {
+    throw new Error('Could not refresh your sign-in session. Please sign in again before uploading.');
   }
 
-  // 1. Generate local preview URL immediately for zero-lag sender experience
-  let localPreview = '';
-  if (validation.category === 'image' && file.size <= 4 * 1024 * 1024) {
-    try {
-      localPreview = await fileToDataUrl(file);
-    } catch {
-      localPreview = URL.createObjectURL(file);
-    }
-  } else {
-    localPreview = URL.createObjectURL(file);
-  }
-
-  // 2. Request presigned upload URL from API Gateway
+  // Request a presigned upload URL from API Gateway.
   try {
     const initRes = await fetch(`${API_BASE_URL}/upload-url`, {
       method: 'POST',
@@ -295,8 +336,8 @@ export async function uploadToS3(
 
     if (initRes.ok) {
       const initData = await initRes.json();
-      const s3Key = initData.key || (initData.post?.fields?.key) || `chats/${uid}/${Date.now()}_${file.name}`;
       const uploadUrl = initData.uploadUrl || initData.url;
+      const s3Key = initData.key || initData.post?.fields?.key || extractKeyFromS3Url(uploadUrl);
 
       // Execute upload to S3
       if (initData.post && initData.post.url && initData.post.fields) {
@@ -320,7 +361,7 @@ export async function uploadToS3(
               reject(new Error(`S3 POST failed (status ${xhr.status})`));
             }
           };
-          xhr.onerror = () => reject(new Error('S3 POST network error'));
+          xhr.onerror = () => reject(new Error('S3 POST network/CORS error. Check the bucket CORS settings.'));
           xhr.onabort = () => reject(new Error('S3 upload aborted'));
 
           const formData = new FormData();
@@ -352,7 +393,7 @@ export async function uploadToS3(
               reject(new Error(`S3 PUT failed with status ${xhr.status}`));
             }
           };
-          xhr.onerror = () => reject(new Error('S3 PUT network error'));
+          xhr.onerror = () => reject(new Error('S3 PUT network/CORS error. Check the bucket CORS settings.'));
           xhr.onabort = () => reject(new Error('S3 upload aborted'));
 
           xhr.setRequestHeader('Content-Type', validation.mimeType || 'application/octet-stream');
@@ -360,15 +401,18 @@ export async function uploadToS3(
         });
       }
 
-      // 3. Immediately fetch the valid signed GET download URL from API Gateway
-      const signedDownloadUrl = await getPresignedDownloadUrl(s3Key);
+      if (!s3Key || (!initData.post?.url && !uploadUrl)) {
+        throw new Error('Upload service did not return an S3 upload URL.');
+      }
+
+      // Keep a GetObject URL only when the upload endpoint returned one. If it
+      // did not, the message viewer requests one with the persisted room/message IDs.
+      const signedDownloadUrl = pickGetObjectUrl(initData, uploadUrl);
 
       return {
         key: s3Key,
-        // url: stored in Firestore as the signed GetObject URL (never local blob)
         url: signedDownloadUrl,
         downloadUrl: signedDownloadUrl,
-        previewUrl: localPreview, // used for instantaneous 0ms sender preview
         name: file.name,
         fileName: file.name,
         size: file.size,
@@ -378,27 +422,17 @@ export async function uploadToS3(
         category: validation.category
       };
     }
+
+    const errBody = await initRes.json().catch(() => ({}));
+    const message = (errBody && (errBody.error || errBody.message)) || `Upload request failed (${initRes.status})`;
+    throw new Error(typeof message === 'string' ? message : 'Upload request failed');
   } catch (s3Err) {
-    console.warn('[S3] Pipeline issue, using local media fallback:', s3Err);
+    console.error('[S3] Upload failed:', s3Err);
+    if (s3Err instanceof TypeError) {
+      throw new Error('Could not reach the upload service. Check API Gateway and S3 CORS/network settings.');
+    }
+    throw s3Err instanceof Error ? s3Err : new Error('Could not upload the file to S3.');
   }
-
-  // Fallback: If S3 upload fails or network blips, return the local preview so user's image is preserved
-  if (onProgress) onProgress(100);
-  const fallbackKey = `chats/${uid}/${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-
-  return {
-    key: fallbackKey,
-    url: localPreview,
-    downloadUrl: localPreview,
-    previewUrl: localPreview,
-    name: file.name,
-    fileName: file.name,
-    size: file.size,
-    fileSize: file.size,
-    mimeType: validation.mimeType,
-    type: validation.mimeType,
-    category: validation.category
-  };
 }
 
 export function formatBytes(bytes?: number, decimals: number = 1): string {

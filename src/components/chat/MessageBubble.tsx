@@ -15,7 +15,12 @@ import {
 import { ChatMessage, ChatUser } from '../../types/chat.types';
 import { Avatar } from '../common/Avatar';
 import { renderMarkdownToSafeHtml } from '../../services/sanitize';
-import { formatBytes, getPresignedDownloadUrl } from '../../services/s3Service';
+import {
+  extractKeyFromS3Url,
+  formatBytes,
+  getPresignedDownloadUrl,
+  isOpenableS3Url
+} from '../../services/s3Service';
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -60,58 +65,128 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isOutgoing = currentUser ? message.sender.uid === currentUser.uid : false;
   const senderColor = getSenderColor(message.sender.displayName || 'Scholar');
 
-  // Media attachment URL resolution with automatic presigned S3 hydration
-  const initialMediaUrl =
-    message.attachment?.previewUrl ||
-    message.attachment?.url ||
-    message.attachment?.downloadUrl ||
-    '';
+  // Local previews are session-only. Anything stored from S3 must be a GetObject
+  // URL — a PutObject signature or an unsigned bucket URL opens as AccessDenied.
+  const localPreview =
+    message.attachment?.previewUrl &&
+    (message.attachment.previewUrl.startsWith('blob:') ||
+      message.attachment.previewUrl.startsWith('data:'))
+      ? message.attachment.previewUrl
+      : '';
+  const storedUrl = [message.attachment?.downloadUrl, message.attachment?.url].find((url) =>
+    isOpenableS3Url(url)
+  ) || '';
 
-  const [mediaUrl, setMediaUrl] = useState<string>(initialMediaUrl);
+  const [mediaUrl, setMediaUrl] = useState<string>(localPreview || storedUrl);
   const [mediaLoading, setMediaLoading] = useState<boolean>(false);
+  const [mediaFailed, setMediaFailed] = useState<boolean>(false);
 
   useEffect(() => {
     let isCurrent = true;
     const att = message.attachment;
-    if (!att || !att.key) return;
-
-    const currentUrl = att.previewUrl || att.url || att.downloadUrl || '';
-
-    // If already a local data/blob URL, or already has AWS presigned signature, use it
-    if (
-      currentUrl.startsWith('data:') ||
-      currentUrl.startsWith('blob:') ||
-      currentUrl.includes('X-Amz-Signature') ||
-      currentUrl.includes('Signature=')
-    ) {
-      setMediaUrl(currentUrl);
+    if (!att) {
+      setMediaUrl('');
+      setMediaLoading(false);
+      setMediaFailed(false);
       return;
     }
 
-    // Otherwise, fetch signed GetObject URL from API Gateway
+    const preview =
+      att.previewUrl && (att.previewUrl.startsWith('blob:') || att.previewUrl.startsWith('data:'))
+        ? att.previewUrl
+        : '';
+    const direct = [att.downloadUrl, att.url].find((url) => isOpenableS3Url(url) && !url?.startsWith('blob:') && !url?.startsWith('data:')) || '';
+    const key = att.key || extractKeyFromS3Url(att.url) || extractKeyFromS3Url(att.downloadUrl);
+
+    setMediaUrl(preview || direct);
+    setMediaFailed(false);
+
+    // Refresh when the stored URL is missing, unsigned, a PutObject URL, or expired.
+    if (!key || (direct && isOpenableS3Url(direct))) {
+      setMediaLoading(false);
+      return;
+    }
+
+    // Wait until Firestore confirms delivery before asking the API for a
+    // message-scoped download URL. The upload may finish before the message exists.
+    if (message.status !== 'delivered') {
+      setMediaLoading(false);
+      return;
+    }
+
     setMediaLoading(true);
-    getPresignedDownloadUrl(att.key, message.roomId, message.id)
+    getPresignedDownloadUrl(key, message.roomId, message.id, false, {
+      fileName: att.fileName || att.name,
+      mimeType: att.mimeType || att.type
+    })
       .then((signedUrl) => {
-        if (isCurrent && signedUrl) {
+        if (!isCurrent) return;
+        if (signedUrl) {
           setMediaUrl(signedUrl);
+          setMediaFailed(false);
+        } else if (!preview) {
+          setMediaFailed(true);
         }
-        if (isCurrent) setMediaLoading(false);
+        setMediaLoading(false);
       })
       .catch(() => {
-        if (isCurrent) setMediaLoading(false);
+        if (!isCurrent) return;
+        setMediaLoading(false);
+        if (!preview) setMediaFailed(true);
       });
 
     return () => {
       isCurrent = false;
     };
-  }, [message.attachment, message.roomId, message.id]);
+  }, [message.attachment, message.roomId, message.id, message.status]);
 
   const handleMediaError = () => {
-    const key = message.attachment?.key;
-    if (key) {
-      getPresignedDownloadUrl(key, message.roomId, message.id).then((freshUrl) => {
-        if (freshUrl) setMediaUrl(freshUrl);
+    const key =
+      message.attachment?.key ||
+      extractKeyFromS3Url(message.attachment?.url) ||
+      extractKeyFromS3Url(message.attachment?.downloadUrl);
+    if (!key || mediaUrl.startsWith('blob:') || mediaUrl.startsWith('data:') || message.status !== 'delivered') return;
+    getPresignedDownloadUrl(key, message.roomId, message.id, true, {
+      fileName: message.attachment?.fileName || message.attachment?.name,
+      mimeType: message.attachment?.mimeType || message.attachment?.type
+    }).then((freshUrl) => {
+      if (freshUrl && freshUrl !== mediaUrl) {
+        setMediaUrl(freshUrl);
+        setMediaFailed(false);
+      } else {
+        setMediaFailed(true);
+      }
+    });
+  };
+
+  const openStoredFile = async (event?: React.MouseEvent) => {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const popup = window.open('about:blank', '_blank');
+    if (popup) popup.opener = null;
+    const key =
+      message.attachment?.key ||
+      extractKeyFromS3Url(mediaUrl) ||
+      extractKeyFromS3Url(message.attachment?.url);
+    const isLocalPreview = mediaUrl.startsWith('blob:') || mediaUrl.startsWith('data:');
+    let url = isLocalPreview || isOpenableS3Url(mediaUrl) ? mediaUrl : '';
+    if (key && !isLocalPreview) {
+      const fresh = await getPresignedDownloadUrl(key, message.roomId, message.id, true, {
+        fileName: message.attachment?.fileName || message.attachment?.name,
+        mimeType: message.attachment?.mimeType || message.attachment?.type
       });
+      if (fresh) url = fresh;
+    }
+    if (!url) {
+      popup?.close();
+      setMediaFailed(true);
+      return;
+    }
+    setMediaUrl(url);
+    if (popup) {
+      popup.location.href = url;
+    } else {
+      setMediaFailed(true);
     }
   };
 
@@ -269,9 +344,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   background: 'rgba(0,0,0,0.2)'
                 }}
                 onClick={() => {
-                  if (onImageClick && mediaUrl) {
-                    onImageClick(mediaUrl, attachmentName);
-                  }
+                  if (!onImageClick || !mediaUrl) return;
+                  onImageClick(mediaUrl, attachmentName);
                 }}
               >
                 {mediaLoading && !mediaUrl ? (
@@ -289,7 +363,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <Loader2 size={20} className="animate-spin" />
                     <span>Loading campus image…</span>
                   </div>
-                ) : (
+                ) : mediaUrl ? (
                   <img
                     src={mediaUrl}
                     alt={attachmentName}
@@ -303,7 +377,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       borderRadius: '10px'
                     }}
                   />
-                )}
+                ) : null}
               </div>
             )}
 
@@ -313,6 +387,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   src={mediaUrl}
                   controls
                   preload="metadata"
+                  onError={handleMediaError}
                   style={{ maxWidth: '100%', maxHeight: '340px', borderRadius: '10px' }}
                 />
               </div>
@@ -332,26 +407,36 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <audio
                   src={mediaUrl}
                   controls
+                  onError={handleMediaError}
                   style={{ height: '40px', maxWidth: '260px' }}
                 />
               </div>
             )}
 
-            {message.attachment.category === 'pdf' && (
-              <a
-                href={mediaUrl || '#'}
-                target="_blank"
-                rel="noopener noreferrer"
-                download={attachmentName}
+            {(message.attachment.category === 'pdf' || message.attachment.category === 'file') && (
+              <button
+                type="button"
+                onClick={openStoredFile}
+                disabled={
+                  message.attachment.uploadState === 'uploading' ||
+                  (!mediaUrl && message.status !== 'delivered')
+                }
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '12px',
+                  width: '100%',
                   padding: '12px 14px',
                   borderRadius: '12px',
                   background: 'rgba(0,0,0,0.25)',
                   textDecoration: 'none',
-                  color: 'inherit'
+                  color: 'inherit',
+                  border: 'none',
+                  cursor:
+                    message.attachment.uploadState === 'uploading' || (!mediaUrl && message.status !== 'delivered')
+                      ? 'wait'
+                      : 'pointer',
+                  textAlign: 'left'
                 }}
               >
                 <div
@@ -384,7 +469,51 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   </div>
                 </div>
                 <Download size={20} style={{ opacity: 0.9 }} />
-              </a>
+              </button>
+            )}
+
+            {mediaFailed && (
+              <button
+                type="button"
+                onClick={openStoredFile}
+                style={{
+                  marginTop: '8px',
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#fca5a5',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  padding: 0
+                }}
+              >
+                Could not open this file. Tap to retry.
+              </button>
+            )}
+
+            {message.attachment.uploadState === 'uploading' && (
+              <div style={{ marginTop: '9px', color: 'var(--text-muted)', fontSize: '12px' }}>
+                {message.attachment.category !== 'pdf' && message.attachment.category !== 'file' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
+                    <FileText size={14} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {attachmentName} · {formatBytes(attachmentSize)}
+                    </span>
+                  </div>
+                )}
+                <div style={{ marginBottom: '5px' }}>
+                  Uploading to S3 · {message.attachment.uploadProgress || 0}%
+                </div>
+                <div style={{ height: '4px', background: 'rgba(255,255,255,0.12)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${message.attachment.uploadProgress || 0}%`,
+                      background: 'var(--accent-primary)',
+                      transition: 'width 0.2s ease'
+                    }}
+                  />
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -416,8 +545,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               color: '#fca5a5'
             }}
           >
-            <span>Delivery failed</span>
+            <span>{message.errorMessage || 'Delivery failed'}</span>
             {message.clientTempId && onRetry && (
+              !message.attachment || message.attachment.key || message.attachment.retryAvailable
+            ) && (
               <button
                 type="button"
                 onClick={() => onRetry(message.clientTempId!)}

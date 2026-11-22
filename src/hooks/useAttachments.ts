@@ -9,7 +9,6 @@ import { MessageAttachment } from '../types/chat.types';
 export function useAttachments() {
   const [stagedFile, setStagedFile] = useState<File | null>(null);
   const [stagedPreview, setStagedPreview] = useState<string | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
@@ -19,6 +18,7 @@ export function useAttachments() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const activeUploadsRef = useRef(0);
 
   // Clean up object URLs to avoid memory leaks
   useEffect(() => {
@@ -60,7 +60,6 @@ export function useAttachments() {
     }
     setStagedFile(null);
     setStagedPreview(null);
-    setUploadProgress(0);
     setUploadError(null);
   }, [stagedPreview]);
 
@@ -183,37 +182,39 @@ export function useAttachments() {
 
   // Upload file to S3
   const uploadCurrentAttachment = useCallback(
-    async (fileToUpload?: File): Promise<MessageAttachment> => {
+    async (
+      fileToUpload?: File,
+      onProgress?: (percent: number) => void
+    ): Promise<MessageAttachment> => {
       const file = fileToUpload || stagedFile;
       if (!file) {
         throw new Error('No file staged for upload.');
       }
 
+      activeUploadsRef.current += 1;
       setIsUploading(true);
-      setUploadProgress(0);
       setUploadError(null);
 
       try {
         const attachment = await uploadToS3(file, (percent) => {
-          setUploadProgress(percent);
+          onProgress?.(percent);
         });
-        clearStagedFile();
         return attachment;
       } catch (err: unknown) {
         const error = err as Error;
         setUploadError(error.message || 'Upload failed');
         throw error;
       } finally {
-        setIsUploading(false);
+        activeUploadsRef.current = Math.max(0, activeUploadsRef.current - 1);
+        setIsUploading(activeUploadsRef.current > 0);
       }
     },
-    [stagedFile, clearStagedFile]
+    [stagedFile]
   );
 
   return {
     stagedFile,
     stagedPreview,
-    uploadProgress,
     isUploading,
     uploadError,
     isRecording,
