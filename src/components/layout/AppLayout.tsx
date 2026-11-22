@@ -13,13 +13,20 @@ import {
   ChatUser,
   ChatMessage,
   MessageReplyReference,
-  UserPreferences
+  UserPreferences,
+  DirectConversation
 } from '../../types/chat.types';
 
 interface AppLayoutProps {
   rooms: ChatRoom[];
   activeRoom: ChatRoom;
+  activeDirectUser: ChatUser | null;
+  activeDirectConversationId: string | null;
+  directConversations: DirectConversation[];
+  unreadDirectConversationIds: Set<string>;
   onSelectRoom: (roomId: string) => void;
+  onSelectDirectConversation: (conversation: DirectConversation) => void;
+  onOpenNewDirectMessage: () => void;
   currentUser: ChatUser | null;
   preferences: UserPreferences;
   onToggleTheme: () => void;
@@ -66,7 +73,13 @@ interface AppLayoutProps {
 export const AppLayout: React.FC<AppLayoutProps> = ({
   rooms,
   activeRoom,
+  activeDirectUser,
+  activeDirectConversationId,
+  directConversations,
+  unreadDirectConversationIds,
   onSelectRoom,
+  onSelectDirectConversation,
+  onOpenNewDirectMessage,
   currentUser,
   preferences,
   onToggleTheme,
@@ -144,6 +157,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         rooms={rooms}
         activeRoomId={activeRoom.id}
         onSelectRoom={onSelectRoom}
+        directConversations={directConversations}
+        activeDirectConversationId={activeDirectConversationId}
+        unreadDirectConversationIds={unreadDirectConversationIds}
+        onSelectDirectConversation={onSelectDirectConversation}
+        onOpenNewDirectMessage={onOpenNewDirectMessage}
         currentUser={currentUser}
         unreadCounts={unreadCounts}
         onOpenCreateChannel={onOpenCreateChannel}
@@ -159,6 +177,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         {/* JNUverse Header */}
         <Header
           currentRoom={activeRoom}
+          directUser={activeDirectUser}
           onlineCount={onlineCount}
           currentUser={currentUser}
           theme={preferences.theme}
@@ -212,12 +231,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
         {/* WhatsApp-Style Pill Input Bar */}
         <ChatInputBar
+          key={activeDirectConversationId || activeRoom.id}
           onSendMessage={async (txt, file) => {
             await onSendMessage(txt, file);
             onSetReplyTo(null);
           }}
           onTyping={onTyping}
           replyTo={replyTo}
+          placeholder={activeDirectUser ? `Message ${activeDirectUser.displayName}…` : 'Message #JNUverse… (paste photos or press Enter)'}
           onCancelReply={() => onSetReplyTo(null)}
           stagedFile={stagedFile}
           stagedPreview={stagedPreview}

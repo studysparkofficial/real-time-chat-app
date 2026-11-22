@@ -10,6 +10,25 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == uid;
     }
 
+    function isDirectRoomId(roomId) {
+      return roomId.matches('^dm_.*$');
+    }
+
+    function isDirectRoomMember(roomId) {
+      let roomPath = /databases/$(database)/documents/rooms/$(roomId);
+      return isAuthenticated()
+        && isDirectRoomId(roomId)
+        && exists(roomPath)
+        && get(roomPath).data.type == 'direct'
+        && get(roomPath).data.participants is list
+        && get(roomPath).data.participants.hasAny([request.auth.uid]);
+    }
+
+    function canReadRoomMessages(roomId) {
+      return isAuthenticated()
+        && (!isDirectRoomId(roomId) || isDirectRoomMember(roomId));
+    }
+
     // Message validation helpers.
     // Missing fields must be checked with keys() first. Reading a field that
     // was not written (for example text-only messages with no attachment)
@@ -32,12 +51,61 @@ service cloud.firestore {
       );
     }
 
-    // Messages collection under rooms
+    // Conversation documents are created only for direct chats. Their message
+    // subcollections share the existing room message path so media downloads
+    // continue to use the same message-scoped S3 API.
+    match /rooms/{roomId} {
+      // A transaction may probe a deterministic ID before creating it. An
+      // existing direct room remains readable only to its two participants.
+      allow get: if isAuthenticated()
+        && (!exists(/databases/$(database)/documents/rooms/$(roomId))
+          || isDirectRoomMember(roomId));
+      allow list: if isDirectRoomMember(roomId);
+
+      allow create: if isAuthenticated()
+        && isDirectRoomId(roomId)
+        && request.resource.data.keys().hasOnly([
+          'type', 'participants', 'participantInfo', 'createdAt',
+          'lastMessage', 'lastMessageAt', 'lastSenderUid'
+        ])
+        && request.resource.data.type == 'direct'
+        && request.resource.data.participants is list
+        && request.resource.data.participants.size() == 2
+        && request.resource.data.participants[0] is string
+        && request.resource.data.participants[1] is string
+        && request.resource.data.participants[0] != request.resource.data.participants[1]
+        && request.resource.data.participants.hasAny([request.auth.uid])
+        && request.resource.data.participantInfo is map
+        && request.resource.data.participantInfo.keys().hasAll(request.resource.data.participants)
+        && request.resource.data.createdAt is int
+        && request.resource.data.lastMessage is string
+        && request.resource.data.lastMessageAt is int;
+
+      // Participants can update only the latest-message preview. Membership,
+      // participant labels, and creation time remain fixed after creation.
+      allow update: if isDirectRoomMember(roomId)
+        && request.resource.data.type == resource.data.type
+        && request.resource.data.participants == resource.data.participants
+        && request.resource.data.participantInfo == resource.data.participantInfo
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'lastMessage', 'lastMessageAt', 'lastSenderUid'
+        ])
+        && request.resource.data.lastMessage is string
+        && request.resource.data.lastMessage.size() <= 180
+        && request.resource.data.lastMessageAt is timestamp
+        && request.resource.data.lastMessageAt == request.time
+        && request.resource.data.lastSenderUid == request.auth.uid;
+
+      allow delete: if false;
+    }
+
+    // Messages collection under public rooms and participant-only DMs.
     match /rooms/{roomId}/messages/{messageId} {
-      allow read: if isAuthenticated();
+      allow read: if canReadRoomMessages(roomId);
 
       // Creating a message: must be from the authenticated sender
-      allow create: if isAuthenticated()
+      allow create: if canReadRoomMessages(roomId)
         && hasField(request.resource.data, 'sender')
         && request.resource.data.sender.uid == request.auth.uid
         && (!hasField(request.resource.data, 'text') || isValidText(request.resource.data.text))
@@ -51,21 +119,49 @@ service cloud.firestore {
         );
 
       // Updating a message: allows emoji reactions by any room member, or editing by owner
-      allow update: if isAuthenticated()
+      allow update: if canReadRoomMessages(roomId)
         && (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) ||
           resource.data.sender.uid == request.auth.uid
         );
 
       // Deleting a message: sender only
-      allow delete: if isAuthenticated()
+      allow delete: if canReadRoomMessages(roomId)
         && resource.data.sender.uid == request.auth.uid;
     }
 
     // Room typing indicators
     match /rooms/{roomId}/typing/{userKey} {
+      allow read: if canReadRoomMessages(roomId);
+      allow write: if canReadRoomMessages(roomId) && request.auth.uid == userKey;
+    }
+
+    // Per-user read state is private and synced across the user's devices.
+    match /user_private/{uid}/dm_state/{conversationId} {
+      allow read: if isOwner(uid) && isDirectRoomMember(conversationId);
+      allow create, update: if isOwner(uid)
+        && isDirectRoomMember(conversationId)
+        && request.resource.data.keys().hasOnly(['lastReadAt'])
+        && request.resource.data.lastReadAt is timestamp
+        && request.resource.data.lastReadAt == request.time;
+      allow delete: if isOwner(uid) && isDirectRoomMember(conversationId);
+    }
+
+    // Minimal profiles power the searchable New Chat picker. Email addresses
+    // are intentionally excluded from this public-to-members directory.
+    match /user_profiles/{uid} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == userKey;
+      allow create, update: if isOwner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.keys().hasOnly([
+          'uid', 'displayName', 'displayNameLower', 'photoURL', 'isAnonymous',
+          'status', 'updatedAt'
+        ])
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() <= 80
+        && request.resource.data.displayNameLower is string
+        && request.resource.data.displayNameLower.size() <= 80;
+      allow delete: if false;
     }
 
     // Online users presence

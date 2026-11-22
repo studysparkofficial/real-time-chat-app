@@ -5,6 +5,7 @@ import { Avatar } from '../common/Avatar';
 
 interface HeaderProps {
   currentRoom: ChatRoom;
+  directUser?: ChatUser | null;
   onlineCount: number;
   currentUser: ChatUser | null;
   theme: 'dark' | 'light';
@@ -16,6 +17,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({
   currentRoom,
+  directUser = null,
   onlineCount,
   currentUser,
   theme,
@@ -58,13 +60,13 @@ export const Header: React.FC<HeaderProps> = ({
           title="JNUverse Campus Hub"
         />
 
-        {/* Tapping channel header triggers Channel Info & Active Members Sheet */}
+        {/* Channel details or the active one-to-one chat */}
         <div
           className="chat-header-left"
-          onClick={onOpenChannelInfo}
-          role="button"
-          tabIndex={0}
-          title="Click to view Channel Details & Active Members"
+          onClick={directUser ? undefined : onOpenChannelInfo}
+          role={directUser ? undefined : 'button'}
+          tabIndex={directUser ? undefined : 0}
+          title={directUser ? `Private chat with ${directUser.displayName}` : 'Click to view Channel Details & Active Members'}
         >
           <div
             style={{
@@ -80,7 +82,9 @@ export const Header: React.FC<HeaderProps> = ({
               flexShrink: 0
             }}
           >
-            {isEmoji ? currentRoom.icon : <Hash size={20} />}
+            {directUser
+              ? <Avatar src={directUser.photoURL} name={directUser.displayName} status={directUser.status} size="sm" />
+              : isEmoji ? currentRoom.icon : <Hash size={20} />}
           </div>
 
           <div style={{ minWidth: 0 }}>
@@ -102,7 +106,7 @@ export const Header: React.FC<HeaderProps> = ({
                   textOverflow: 'ellipsis'
                 }}
               >
-                {currentRoom.name}
+                {directUser?.displayName || currentRoom.name}
               </h2>
             </div>
             <div
@@ -114,16 +118,33 @@ export const Header: React.FC<HeaderProps> = ({
                 gap: '6px'
               }}
             >
-              <span
-                style={{
-                  display: 'inline-block',
-                  width: '7px',
-                  height: '7px',
-                  borderRadius: '50%',
-                  background: 'var(--status-online, #10b981)'
-                }}
-              />
-              <span>{onlineCount} {onlineCount === 1 ? 'scholar' : 'scholars'} online</span>
+              {directUser ? (
+                <>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      background: directUser.status === 'online' ? 'var(--status-online, #10b981)' : 'var(--text-muted)'
+                    }}
+                  />
+                  <span>{directUser.status === 'online' ? 'Online' : directUser.status === 'offline' ? 'Offline' : directUser.status}</span>
+                </>
+              ) : (
+                <>
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      background: 'var(--status-online, #10b981)'
+                    }}
+                  />
+                  <span>{onlineCount} {onlineCount === 1 ? 'scholar' : 'scholars'} online</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -131,14 +152,14 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Action Icons: Channel Info, Theme Toggle, Profile Avatar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <button
+        {!directUser && <button
           type="button"
           onClick={onOpenChannelInfo}
           className="header-action-btn"
           title="Channel Info & Members"
         >
           <Users size={22} />
-        </button>
+        </button>}
 
         <button
           type="button"

@@ -13,6 +13,23 @@ export interface ChatUser {
   lastSeen?: number;
 }
 
+export interface DirectConversationParticipant {
+  uid: string;
+  displayName: string;
+  photoURL?: string | null;
+  isAnonymous?: boolean;
+}
+
+export interface DirectConversation {
+  id: string;
+  participants: string[];
+  participantInfo: Record<string, DirectConversationParticipant>;
+  lastMessage?: string;
+  lastMessageAt?: number;
+  lastSenderUid?: string;
+  peer: ChatUser;
+}
+
 export type MessageDeliveryStatus = 'sending' | 'sent' | 'delivered' | 'failed';
 
 export interface MessageAttachment {

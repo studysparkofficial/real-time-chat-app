@@ -6,6 +6,7 @@ import { ChannelInfoModal } from './components/modals/ChannelInfoModal';
 import { CreateChannelModal } from './components/modals/CreateChannelModal';
 import { LightboxModal } from './components/modals/LightboxModal';
 import { PwaInstallModal } from './components/modals/PwaInstallModal';
+import { NewDirectMessageModal } from './components/modals/NewDirectMessageModal';
 import { ToastMessage } from './components/common/Toast';
 
 import { useAuth } from './hooks/useAuth';
@@ -15,11 +16,12 @@ import { useAttachments } from './hooks/useAttachments';
 import { useAudio } from './hooks/useAudio';
 import { useHaptics } from './hooks/useHaptics';
 import { usePwaInstall } from './hooks/usePwaInstall';
+import { useDirectMessages } from './hooks/useDirectMessages';
 
 import { db, collection, addDoc, onSnapshot } from './services/firebase';
 import { localCache } from './services/indexedDbCache';
 import { validateAttachment } from './services/s3Service';
-import { ChatRoom, MessageAttachment, MessageReplyReference } from './types/chat.types';
+import { ChatRoom, ChatUser, DirectConversation, MessageAttachment, MessageReplyReference } from './types/chat.types';
 
 // Official JNU Campus Channels
 const JNU_DEFAULT_ROOMS: ChatRoom[] = [
@@ -115,12 +117,15 @@ export const App: React.FC = () => {
   const [rooms, setRooms] = useState<ChatRoom[]>(JNU_DEFAULT_ROOMS);
   const [activeRoomId, setActiveRoomId] = useState<string>('campus-central');
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [activeDirectConversationId, setActiveDirectConversationId] = useState<string | null>(null);
+  const [activeDirectPeer, setActiveDirectPeer] = useState<ChatUser | null>(null);
 
   // 4. Modals and Overlays State
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [channelInfoModalOpen, setChannelInfoModalOpen] = useState(false);
   const [createChannelModalOpen, setCreateChannelModalOpen] = useState(false);
+  const [newDirectMessageModalOpen, setNewDirectMessageModalOpen] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [lightboxName, setLightboxName] = useState<string | undefined>(undefined);
   const [installOnboardingOpen, setInstallOnboardingOpen] = useState(false);
@@ -239,8 +244,18 @@ export const App: React.FC = () => {
     return rooms.find((r) => r.id === activeRoomId) || rooms[0] || JNU_DEFAULT_ROOMS[0];
   }, [rooms, activeRoomId]);
 
+  const {
+    conversations: directConversations,
+    unreadConversationIds: unreadDirectConversationIds,
+    startConversation,
+    markRead: markDirectConversationRead
+  } = useDirectMessages(currentUser);
+
   // Clear unread count for newly selected room
   const handleSelectRoom = useCallback((roomId: string) => {
+    setReplyTo(null);
+    setActiveDirectConversationId(null);
+    setActiveDirectPeer(null);
     setActiveRoomId(roomId);
     setUnreadCounts((prev) => {
       if (!prev[roomId]) return prev;
@@ -250,11 +265,62 @@ export const App: React.FC = () => {
     });
   }, []);
 
+  const handleSelectDirectConversation = useCallback((conversation: DirectConversation) => {
+    setReplyTo(null);
+    setActiveDirectConversationId(conversation.id);
+    setActiveDirectPeer(conversation.peer);
+    void markDirectConversationRead(conversation.id);
+  }, [markDirectConversationRead]);
+
+  const handleStartDirectConversation = useCallback(async (peer: ChatUser) => {
+    const conversationId = await startConversation(peer);
+    setReplyTo(null);
+    setActiveDirectConversationId(conversationId);
+    setActiveDirectPeer(peer);
+    await markDirectConversationRead(conversationId);
+  }, [startConversation, markDirectConversationRead]);
+
   // 7. Presence Hook (Heartbeat, Typing Indicator debouncing, Stream Latency)
   const { onlineMembers, typingUsers, latencyMs, sendTyping } = usePresence(
     currentUser,
-    activeRoom.id
+    activeDirectConversationId || activeRoom.id
   );
+
+  const liveDirectConversations = useMemo(() => directConversations.map((conversation) => {
+    const livePeer = onlineMembers.find((member) => member.uid === conversation.peer.uid);
+    return {
+      ...conversation,
+      peer: {
+        ...conversation.peer,
+        status: livePeer?.status || 'offline'
+      }
+    };
+  }), [directConversations, onlineMembers]);
+
+  const activeDirectUser = useMemo(() => {
+    if (!activeDirectPeer) return null;
+    const livePeer = onlineMembers.find((member) => member.uid === activeDirectPeer.uid);
+    return { ...activeDirectPeer, status: livePeer?.status || 'offline' };
+  }, [activeDirectPeer, onlineMembers]);
+
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setActiveDirectConversationId(null);
+      setActiveDirectPeer(null);
+      setNewDirectMessageModalOpen(false);
+      return;
+    }
+
+    if (!activeDirectConversationId) return;
+    void markDirectConversationRead(activeDirectConversationId);
+  }, [
+    currentUser?.uid,
+    activeDirectConversationId,
+    directConversations.find((item) => item.id === activeDirectConversationId)?.lastMessageAt,
+    markDirectConversationRead
+  ]);
+
+  const activeMessageRoomId = activeDirectConversationId || activeRoom.id;
 
   // 8. Messages Hook (Virtualization, Optimistic delivery, Offline IDB cache, Outbox queue)
   const {
@@ -271,7 +337,7 @@ export const App: React.FC = () => {
     toggleReaction,
     deleteMessage
   } = useMessages(
-    activeRoom.id,
+    activeMessageRoomId,
     currentUser,
     playSent,
     playReceived,
@@ -294,6 +360,15 @@ export const App: React.FC = () => {
     cancelRecording,
     uploadCurrentAttachment
   } = useAttachments();
+
+  useEffect(() => {
+    clearStagedFile();
+    if (isRecording) cancelRecording();
+    setReplyTo(null);
+    // Staged-file cleanup changes identity with its preview; key this effect to
+    // the selected chat so switching conversations cannot carry drafts/media.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMessageRoomId]);
 
   const pendingUploadFilesRef = useRef<Map<string, File>>(new Map());
 
@@ -447,6 +522,7 @@ export const App: React.FC = () => {
     accountModalOpen ||
     channelInfoModalOpen ||
     createChannelModalOpen ||
+    newDirectMessageModalOpen ||
     installOnboardingOpen ||
     lightboxUrl ||
     isSidebarOpenMobile
@@ -468,6 +544,8 @@ export const App: React.FC = () => {
         setChannelInfoModalOpen(false);
       } else if (createChannelModalOpen) {
         setCreateChannelModalOpen(false);
+      } else if (newDirectMessageModalOpen) {
+        setNewDirectMessageModalOpen(false);
       } else if (installOnboardingOpen) {
         setInstallOnboardingOpen(false);
       } else if (isSidebarOpenMobile) {
@@ -484,6 +562,7 @@ export const App: React.FC = () => {
     accountModalOpen,
     channelInfoModalOpen,
     createChannelModalOpen,
+    newDirectMessageModalOpen,
     installOnboardingOpen,
     isSidebarOpenMobile
   ]);
@@ -493,7 +572,16 @@ export const App: React.FC = () => {
       <AppLayout
         rooms={rooms}
         activeRoom={activeRoom}
+        activeDirectUser={activeDirectUser}
+        activeDirectConversationId={activeDirectConversationId}
+        directConversations={liveDirectConversations}
+        unreadDirectConversationIds={unreadDirectConversationIds}
         onSelectRoom={handleSelectRoom}
+        onSelectDirectConversation={handleSelectDirectConversation}
+        onOpenNewDirectMessage={() => {
+          if (!currentUser) setAuthModalOpen(true);
+          else setNewDirectMessageModalOpen(true);
+        }}
         currentUser={currentUser}
         preferences={preferences}
         onToggleTheme={handleToggleTheme}
@@ -565,7 +653,7 @@ export const App: React.FC = () => {
       />
 
       <ChannelInfoModal
-        isOpen={channelInfoModalOpen}
+        isOpen={channelInfoModalOpen && !activeDirectConversationId}
         onClose={() => setChannelInfoModalOpen(false)}
         room={activeRoom}
         onlineMembers={onlineMembers}
@@ -577,6 +665,14 @@ export const App: React.FC = () => {
         onClose={() => setCreateChannelModalOpen(false)}
         onCreateChannel={handleCreateChannel}
         onShowToast={(txt) => addToast(txt, 'success')}
+      />
+
+      <NewDirectMessageModal
+        isOpen={newDirectMessageModalOpen}
+        currentUser={currentUser}
+        onlineUsers={onlineMembers}
+        onClose={() => setNewDirectMessageModalOpen(false)}
+        onSelectUser={handleStartDirectConversation}
       />
 
       <LightboxModal

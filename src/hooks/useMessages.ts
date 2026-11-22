@@ -3,14 +3,14 @@ import {
   db,
   collection,
   doc,
-  setDoc,
   updateDoc,
   deleteDoc,
   onSnapshot,
   query,
   orderBy,
   limit,
-  serverTimestamp
+  serverTimestamp,
+  writeBatch
 } from '../services/firebase';
 import { localCache } from '../services/indexedDbCache';
 import {
@@ -24,6 +24,7 @@ import {
   MessageAttachment,
   MessageReplyReference
 } from '../types/chat.types';
+import { isDirectConversationId } from '../services/directMessages';
 
 function toMillis(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -107,7 +108,20 @@ function firestoreMessagePayload(message: ChatMessage): Record<string, unknown> 
 async function persistMessage(message: ChatMessage): Promise<void> {
   const messageId = `msg_${message.clientTempId || message.id}`;
   const messageRef = doc(db, `rooms/${message.roomId}/messages`, messageId);
-  await setDoc(messageRef, firestoreMessagePayload(message));
+  const batch = writeBatch(db);
+  batch.set(messageRef, firestoreMessagePayload(message));
+
+  if (isDirectConversationId(message.roomId)) {
+    const preview = (message.text || '').trim()
+      || (message.attachment ? `📎 ${message.attachment.fileName || message.attachment.name || 'Attachment'}` : '');
+    batch.update(doc(db, 'rooms', message.roomId), {
+      lastMessage: preview.slice(0, 180),
+      lastMessageAt: serverTimestamp(),
+      lastSenderUid: message.sender.uid
+    });
+  }
+
+  await batch.commit();
 }
 
 function dedupeMessages(list: ChatMessage[]): ChatMessage[] {

@@ -66,6 +66,21 @@ export function useAuth() {
             lastSeen: Date.now()
           };
           setUser(chatUser);
+          void setDoc(
+            doc(db, 'user_profiles', fbUser.uid),
+            {
+              uid: fbUser.uid,
+              displayName: chatUser.displayName,
+              displayNameLower: chatUser.displayName.toLocaleLowerCase(),
+              photoURL: chatUser.photoURL || '👤',
+              isAnonymous: Boolean(fbUser.isAnonymous),
+              status: 'online',
+              updatedAt: Date.now()
+            },
+            { merge: true }
+          ).catch((error) => {
+            console.warn('[Profiles] Profile sync failed:', error);
+          });
         } else {
           setUser(null);
         }
@@ -151,19 +166,34 @@ export function useAuth() {
       };
       setUser(updatedUser);
 
-      // Sync to online_users collection
-      await setDoc(
-        doc(db, 'online_users', user.uid),
-        {
-          uid: user.uid,
-          displayName: updatedUser.displayName,
-          photoURL: updatedUser.photoURL,
-          status: updatedUser.status,
-          bio: updatedUser.bio,
-          lastSeen: Date.now()
-        },
-        { merge: true }
-      );
+      // Sync the public directory profile and live presence separately.
+      await Promise.all([
+        setDoc(
+          doc(db, 'online_users', user.uid),
+          {
+            uid: user.uid,
+            displayName: updatedUser.displayName,
+            photoURL: updatedUser.photoURL,
+            status: updatedUser.status,
+            bio: updatedUser.bio,
+            lastSeen: Date.now()
+          },
+          { merge: true }
+        ),
+        setDoc(
+          doc(db, 'user_profiles', user.uid),
+          {
+            uid: user.uid,
+            displayName: updatedUser.displayName,
+            displayNameLower: updatedUser.displayName.toLocaleLowerCase(),
+            photoURL: updatedUser.photoURL,
+            isAnonymous: Boolean(updatedUser.isAnonymous),
+            status: updatedUser.status,
+            updatedAt: Date.now()
+          },
+          { merge: true }
+        )
+      ]);
     },
     [user]
   );

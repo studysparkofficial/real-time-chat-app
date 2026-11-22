@@ -15,6 +15,7 @@ import { formatBytes } from '../../services/s3Service';
 
 interface ChatInputBarProps {
   onSendMessage: (text: string, file?: File | null) => Promise<void>;
+  placeholder?: string;
   onTyping: () => void;
   replyTo: MessageReplyReference | null;
   onCancelReply: () => void;
@@ -36,6 +37,7 @@ const COMMON_EMOJIS = ['🎓', '☕', '📚', '🏛️', '🔥', '👍', '❤️
 
 export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   onSendMessage,
+  placeholder = 'Message #JNUverse… (paste photos or press Enter)',
   onTyping,
   replyTo,
   onCancelReply,
@@ -397,7 +399,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             <textarea
               ref={textareaRef}
               className="pill-textarea"
-              placeholder="Message #JNUverse… (paste photos or press Enter)"
+              placeholder={placeholder}
               rows={1}
               value={text}
               onChange={handleChange}
