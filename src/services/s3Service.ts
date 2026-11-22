@@ -204,7 +204,14 @@ export function isOpenableS3Url(url?: string): boolean {
 }
 
 function pickGetObjectUrl(data: Record<string, unknown>, uploadUrlToIgnore?: string): string {
-  const candidates = [data.downloadUrl, data.getUrl, data.signedUrl, data.url];
+  const candidates = [
+    data.downloadUrl,
+    data.getObjectUrl,
+    data.getUrl,
+    data.presignedUrl,
+    data.signedUrl,
+    data.url
+  ];
   for (const candidate of candidates) {
     if (typeof candidate !== 'string' || !candidate) continue;
     if (uploadUrlToIgnore && candidate === uploadUrlToIgnore) continue;
@@ -212,6 +219,54 @@ function pickGetObjectUrl(data: Record<string, unknown>, uploadUrlToIgnore?: str
     if (isUrlPresignedAndValid(candidate)) return candidate;
   }
   return '';
+}
+
+function unwrapApiPayload(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  let payload = value as Record<string, unknown>;
+
+  // Support API Gateway proxy responses as well as direct Lambda JSON responses.
+  if (typeof payload.body === 'string') {
+    try {
+      const body = JSON.parse(payload.body) as unknown;
+      if (body && typeof body === 'object' && !Array.isArray(body)) {
+        payload = { ...payload, ...(body as Record<string, unknown>) };
+      }
+    } catch {
+      payload = { ...payload, message: payload.body };
+    }
+  }
+  if (payload.data && typeof payload.data === 'object' && !Array.isArray(payload.data)) {
+    payload = { ...payload, ...(payload.data as Record<string, unknown>) };
+  }
+  return payload;
+}
+
+async function readApiPayload(response: Response): Promise<Record<string, unknown>> {
+  const responseText = await response.text();
+  if (!responseText) return {};
+  try {
+    return unwrapApiPayload(JSON.parse(responseText) as unknown);
+  } catch {
+    return { message: responseText.slice(0, 300) };
+  }
+}
+
+function responseErrorMessage(payload: Record<string, unknown>, status: number): string {
+  const detail = payload.error || payload.message;
+  if (typeof detail === 'string' && detail.trim()) return detail.trim();
+  if (status === 401) return 'Your sign-in session expired. Please sign in again.';
+  if (status === 403) return 'Your account is not authorized to upload this file.';
+  return `Upload request failed (HTTP ${status}).`;
+}
+
+function s3XhrError(operation: 'PUT' | 'POST', xhr: XMLHttpRequest): Error {
+  const detail = (xhr.responseText || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 180);
+  return new Error(`S3 ${operation} rejected (HTTP ${xhr.status || 'network error'})${detail ? `: ${detail}` : ''}`);
 }
 
 /**
@@ -277,10 +332,16 @@ export async function getPresignedDownloadUrl(
         headers,
         body: JSON.stringify(payload)
       });
-      if (!res.ok) continue;
-      const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        console.warn(`[DownloadUrl] ${path} returned HTTP ${res.status}.`);
+        continue;
+      }
+      const data = await readApiPayload(res);
       const downloadUrl = pickGetObjectUrl(data);
-      if (!downloadUrl) continue;
+      if (!downloadUrl) {
+        console.warn(`[DownloadUrl] ${path} did not return a valid GetObject URL.`);
+        continue;
+      }
       const expiresInSec = typeof data.expiresIn === 'number' ? data.expiresIn : 900;
       downloadUrlCache.set(cleanKey, {
         url: downloadUrl,
@@ -334,17 +395,35 @@ export async function uploadToS3(
       })
     });
 
+    const initData = await readApiPayload(initRes);
     if (initRes.ok) {
-      const initData = await initRes.json();
-      const uploadUrl = initData.uploadUrl || initData.url;
-      const s3Key = initData.key || initData.post?.fields?.key || extractKeyFromS3Url(uploadUrl);
+      const rawPost = initData.post || initData.presignedPost;
+      const postData = rawPost && typeof rawPost === 'object'
+        ? rawPost as Record<string, unknown>
+        : initData.fields && initData.url
+          ? { url: initData.url, fields: initData.fields }
+          : null;
+      const postUrl = typeof postData?.url === 'string' ? postData.url : '';
+      const postFields = postData?.fields && typeof postData.fields === 'object'
+        ? postData.fields as Record<string, unknown>
+        : null;
+      const uploadUrl = typeof initData.uploadUrl === 'string'
+        ? initData.uploadUrl
+        : typeof initData.putUrl === 'string'
+          ? initData.putUrl
+          : !postData && typeof initData.url === 'string'
+            ? initData.url
+            : '';
+      const s3Key = (typeof initData.key === 'string' ? initData.key : '')
+        || (typeof postFields?.key === 'string' ? postFields.key : '')
+        || extractKeyFromS3Url(uploadUrl);
 
       // Execute upload to S3
-      if (initData.post && initData.post.url && initData.post.fields) {
+      if (postUrl && postFields) {
         // S3 Presigned POST
         await new Promise<void>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          xhr.open('POST', initData.post.url, true);
+          xhr.open('POST', postUrl, true);
 
           if (xhr.upload && onProgress) {
             xhr.upload.onprogress = (e) => {
@@ -356,17 +435,18 @@ export async function uploadToS3(
 
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
+              onProgress?.(100);
               resolve();
             } else {
-              reject(new Error(`S3 POST failed (status ${xhr.status})`));
+              reject(s3XhrError('POST', xhr));
             }
           };
-          xhr.onerror = () => reject(new Error('S3 POST network/CORS error. Check the bucket CORS settings.'));
+          xhr.onerror = () => reject(new Error('S3 POST network/CORS error. Check the bucket CORS settings and allowed origin.'));
           xhr.onabort = () => reject(new Error('S3 upload aborted'));
 
           const formData = new FormData();
-          Object.entries(initData.post.fields).forEach(([k, v]) => {
-            formData.append(k, v as string);
+          Object.entries(postFields).forEach(([k, v]) => {
+            formData.append(k, typeof v === 'string' ? v : String(v));
           });
           // S3 requires file to be appended last
           formData.append('file', file);
@@ -388,12 +468,13 @@ export async function uploadToS3(
 
           xhr.onload = () => {
             if (xhr.status >= 200 && xhr.status < 300) {
+              onProgress?.(100);
               resolve();
             } else {
-              reject(new Error(`S3 PUT failed with status ${xhr.status}`));
+              reject(s3XhrError('PUT', xhr));
             }
           };
-          xhr.onerror = () => reject(new Error('S3 PUT network/CORS error. Check the bucket CORS settings.'));
+          xhr.onerror = () => reject(new Error('S3 PUT network/CORS error. Check the bucket CORS settings and allowed origin.'));
           xhr.onabort = () => reject(new Error('S3 upload aborted'));
 
           xhr.setRequestHeader('Content-Type', validation.mimeType || 'application/octet-stream');
@@ -401,13 +482,13 @@ export async function uploadToS3(
         });
       }
 
-      if (!s3Key || (!initData.post?.url && !uploadUrl)) {
+      if (!s3Key || (!(postUrl && postFields) && !uploadUrl)) {
         throw new Error('Upload service did not return an S3 upload URL.');
       }
 
       // Keep a GetObject URL only when the upload endpoint returned one. If it
       // did not, the message viewer requests one with the persisted room/message IDs.
-      const signedDownloadUrl = pickGetObjectUrl(initData, uploadUrl);
+      const signedDownloadUrl = pickGetObjectUrl(initData, uploadUrl || postUrl);
 
       return {
         key: s3Key,
@@ -423,9 +504,7 @@ export async function uploadToS3(
       };
     }
 
-    const errBody = await initRes.json().catch(() => ({}));
-    const message = (errBody && (errBody.error || errBody.message)) || `Upload request failed (${initRes.status})`;
-    throw new Error(typeof message === 'string' ? message : 'Upload request failed');
+    throw new Error(responseErrorMessage(initData, initRes.status));
   } catch (s3Err) {
     console.error('[S3] Upload failed:', s3Err);
     if (s3Err instanceof TypeError) {

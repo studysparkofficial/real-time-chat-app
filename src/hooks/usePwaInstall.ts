@@ -12,9 +12,26 @@ function isRunningStandalone(): boolean {
   return displayModeStandalone || iosStandalone;
 }
 
+function hasInstalledMarker(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem('jnuverse-pwa-installed') === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function rememberInstalled(): void {
+  try {
+    window.localStorage.setItem('jnuverse-pwa-installed', 'true');
+  } catch {
+    // Standalone display mode still detects an install when browser storage is unavailable.
+  }
+}
+
 export function usePwaInstall() {
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
-  const [isInstalled, setIsInstalled] = useState(isRunningStandalone);
+  const [isInstalled, setIsInstalled] = useState(() => isRunningStandalone() || hasInstalledMarker());
 
   useEffect(() => {
     const handleBeforeInstallPrompt = (event: Event) => {
@@ -24,6 +41,7 @@ export function usePwaInstall() {
     const handleAppInstalled = () => {
       setInstallPrompt(null);
       setIsInstalled(true);
+      rememberInstalled();
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt as EventListener);
@@ -40,7 +58,10 @@ export function usePwaInstall() {
     try {
       await installPrompt.prompt();
       const choice = await installPrompt.userChoice;
-      if (choice.outcome === 'accepted') setIsInstalled(true);
+      if (choice.outcome === 'accepted') {
+        setIsInstalled(true);
+        rememberInstalled();
+      }
     } catch (error) {
       console.warn('[PWA] Could not open the install prompt:', error);
     } finally {
@@ -50,6 +71,7 @@ export function usePwaInstall() {
 
   return {
     canInstall: Boolean(installPrompt) && !isInstalled,
+    isInstalled,
     promptInstall
   };
 }

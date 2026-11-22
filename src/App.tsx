@@ -5,6 +5,7 @@ import { AccountModal } from './components/modals/AccountModal';
 import { ChannelInfoModal } from './components/modals/ChannelInfoModal';
 import { CreateChannelModal } from './components/modals/CreateChannelModal';
 import { LightboxModal } from './components/modals/LightboxModal';
+import { PwaInstallModal } from './components/modals/PwaInstallModal';
 import { ToastMessage } from './components/common/Toast';
 
 import { useAuth } from './hooks/useAuth';
@@ -73,8 +74,24 @@ const JNU_DEFAULT_ROOMS: ChatRoom[] = [
   }
 ];
 
+function wasInstallOnboardingDismissed(userId: string): boolean {
+  try {
+    return sessionStorage.getItem(`jnuverse-install-dismissed:${userId}`) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function rememberInstallOnboardingDismissal(userId: string): void {
+  try {
+    sessionStorage.setItem(`jnuverse-install-dismissed:${userId}`, 'true');
+  } catch {
+    // The dialog can still be dismissed for the current render if storage is disabled.
+  }
+}
+
 export const App: React.FC = () => {
-  const { canInstall, promptInstall } = usePwaInstall();
+  const { canInstall, isInstalled, promptInstall } = usePwaInstall();
 
   // 1. Auth & Preferences
   const {
@@ -106,6 +123,38 @@ export const App: React.FC = () => {
   const [createChannelModalOpen, setCreateChannelModalOpen] = useState(false);
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [lightboxName, setLightboxName] = useState<string | undefined>(undefined);
+  const [installOnboardingOpen, setInstallOnboardingOpen] = useState(false);
+  const localPreviewUrlsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => () => {
+    localPreviewUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    localPreviewUrlsRef.current.clear();
+  }, []);
+
+  // Keep the chat shell fitted to the visible viewport while the mobile keyboard
+  // is open. The layout viewport stays stable; only the chat area follows the
+  // visual viewport, keeping the composer above the keyboard without page zoom.
+  useEffect(() => {
+    const root = document.documentElement;
+    const visualViewport = window.visualViewport;
+    const updateViewportHeight = () => {
+      const height = visualViewport && visualViewport.scale <= 1.01
+        ? visualViewport.height
+        : window.innerHeight;
+      root.style.setProperty('--app-viewport-height', `${Math.round(height)}px`);
+    };
+
+    updateViewportHeight();
+    visualViewport?.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('orientationchange', updateViewportHeight);
+    return () => {
+      visualViewport?.removeEventListener('resize', updateViewportHeight);
+      window.removeEventListener('resize', updateViewportHeight);
+      window.removeEventListener('orientationchange', updateViewportHeight);
+      root.style.removeProperty('--app-viewport-height');
+    };
+  }, []);
 
   // Automatically prompt new / unauthenticated visitors with the Authentication Modal
   useEffect(() => {
@@ -113,6 +162,19 @@ export const App: React.FC = () => {
       setAuthModalOpen(true);
     }
   }, [authLoading, currentUser]);
+
+  // Show install onboarding once per signed-in session until the app is
+  // installed. Browsers without a native prompt get platform-specific steps.
+  useEffect(() => {
+    if (authLoading) return;
+    if (!currentUser || isInstalled) {
+      setInstallOnboardingOpen(false);
+      return;
+    }
+
+    setAuthModalOpen(false);
+    setInstallOnboardingOpen(!wasInstallOnboardingDismissed(currentUser.uid));
+  }, [authLoading, currentUser?.uid, isInstalled]);
 
   // Sidebar Open States: Mobile Drawer + Desktop Collapsible
   const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
@@ -285,6 +347,10 @@ export const App: React.FC = () => {
           return;
         }
         const mimeType = validation.mimeType;
+        const previewUrl = validation.category === 'image' || validation.category === 'video'
+          ? URL.createObjectURL(file)
+          : undefined;
+        if (previewUrl) localPreviewUrlsRef.current.add(previewUrl);
         const pendingAttachment: MessageAttachment = {
           key: '',
           fileName: file.name,
@@ -294,12 +360,19 @@ export const App: React.FC = () => {
           mimeType,
           type: mimeType,
           category: validation.category,
+          previewUrl,
           uploadState: 'uploading',
           uploadProgress: 0
         };
         const clientTempId = beginAttachmentUpload(text, pendingAttachment, replyTo);
+        if (!clientTempId) {
+          if (pendingAttachment.previewUrl?.startsWith('blob:')) {
+            URL.revokeObjectURL(pendingAttachment.previewUrl);
+            localPreviewUrlsRef.current.delete(pendingAttachment.previewUrl);
+          }
+          return;
+        }
         clearStagedFile();
-        if (!clientTempId) return;
 
         startBackgroundUpload(clientTempId, file);
         return;
@@ -374,6 +447,7 @@ export const App: React.FC = () => {
     accountModalOpen ||
     channelInfoModalOpen ||
     createChannelModalOpen ||
+    installOnboardingOpen ||
     lightboxUrl ||
     isSidebarOpenMobile
   );
@@ -394,6 +468,8 @@ export const App: React.FC = () => {
         setChannelInfoModalOpen(false);
       } else if (createChannelModalOpen) {
         setCreateChannelModalOpen(false);
+      } else if (installOnboardingOpen) {
+        setInstallOnboardingOpen(false);
       } else if (isSidebarOpenMobile) {
         setIsSidebarOpenMobile(false);
       }
@@ -408,6 +484,7 @@ export const App: React.FC = () => {
     accountModalOpen,
     channelInfoModalOpen,
     createChannelModalOpen,
+    installOnboardingOpen,
     isSidebarOpenMobile
   ]);
 
@@ -462,7 +539,7 @@ export const App: React.FC = () => {
         toasts={toasts}
         onDismissToast={dismissToast}
         unreadCounts={unreadCounts}
-        canInstallApp={canInstall}
+        canInstallApp={Boolean(currentUser) && canInstall && !installOnboardingOpen}
         onInstallApp={promptInstall}
       />
 
@@ -508,6 +585,17 @@ export const App: React.FC = () => {
         imageUrl={lightboxUrl}
         fileName={lightboxName}
       />
+
+      {installOnboardingOpen && currentUser && (
+        <PwaInstallModal
+          canInstall={canInstall}
+          onInstall={promptInstall}
+          onClose={() => {
+            rememberInstallOnboardingDismissal(currentUser.uid);
+            setInstallOnboardingOpen(false);
+          }}
+        />
+      )}
     </>
   );
 };

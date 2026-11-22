@@ -37,6 +37,10 @@ export const VirtualizedMessageList: React.FC<VirtualizedMessageListProps> = ({
     estimateSize: () => 86,
     overscan: 6
   });
+  const rowVirtualizerRef = useRef(rowVirtualizer);
+  rowVirtualizerRef.current = rowVirtualizer;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // Track if user is near bottom of scroll container
   const handleScroll = useCallback(() => {
@@ -49,31 +53,40 @@ export const VirtualizedMessageList: React.FC<VirtualizedMessageListProps> = ({
   // Auto-scroll to bottom on new messages if already near bottom
   useEffect(() => {
     if (messages.length > 0 && isNearBottomRef.current) {
-      rowVirtualizer.scrollToIndex(messages.length - 1, { align: 'end' });
+      rowVirtualizerRef.current.scrollToIndex(messages.length - 1, { align: 'end' });
     }
-  }, [messages.length, rowVirtualizer]);
+  }, [messages.length]);
+
+  useEffect(() => {
+    const element = parentRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (messagesRef.current.length > 0 && isNearBottomRef.current) {
+        rowVirtualizerRef.current.scrollToIndex(messagesRef.current.length - 1, { align: 'end' });
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [messages.length > 0]);
 
   // Jump to reply quote message with smooth animation
-  const handleScrollToReply = useCallback(
-    (replyId: string) => {
-      const targetIndex = messages.findIndex((m) => m.id === replyId);
-      if (targetIndex !== -1) {
-        rowVirtualizer.scrollToIndex(targetIndex, { align: 'center', behavior: 'smooth' });
-        // Briefly flash highlighted message
-        setTimeout(() => {
-          const el = document.getElementById(`msg-${replyId}`);
-          if (el) {
-            el.style.transition = 'background-color 0.4s ease';
-            el.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
-            setTimeout(() => {
-              el.style.backgroundColor = 'transparent';
-            }, 1200);
-          }
-        }, 100);
-      }
-    },
-    [messages, rowVirtualizer]
-  );
+  const handleScrollToReply = useCallback((replyId: string) => {
+    const targetIndex = messagesRef.current.findIndex((m) => m.id === replyId);
+    if (targetIndex !== -1) {
+      rowVirtualizerRef.current.scrollToIndex(targetIndex, { align: 'center', behavior: 'smooth' });
+      // Briefly flash highlighted message
+      setTimeout(() => {
+        const el = document.getElementById(`msg-${replyId}`);
+        if (el) {
+          el.style.transition = 'background-color 0.4s ease';
+          el.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
+          setTimeout(() => {
+            el.style.backgroundColor = 'transparent';
+          }, 1200);
+        }
+      }, 100);
+    }
+  }, []);
 
   if (initialLoading && messages.length === 0) {
     return (
@@ -129,7 +142,6 @@ export const VirtualizedMessageList: React.FC<VirtualizedMessageListProps> = ({
       ref={parentRef}
       className="messages-viewport"
       onScroll={handleScroll}
-      style={{ willChange: 'transform' }}
     >
       <div
         style={{

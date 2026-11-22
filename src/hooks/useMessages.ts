@@ -454,9 +454,11 @@ export function useMessages(
   const updateAttachmentUploadProgress = useCallback((clientTempId: string, progress: number) => {
     const msg = optimisticMapRef.current.get(clientTempId);
     if (!msg?.attachment) return;
+    const uploadProgress = Math.max(0, Math.min(100, Math.round(progress)));
+    if (msg.attachment.uploadProgress === uploadProgress) return;
     const updated: ChatMessage = {
       ...msg,
-      attachment: { ...msg.attachment, uploadProgress: Math.max(0, Math.min(100, progress)) }
+      attachment: { ...msg.attachment, uploadProgress }
     };
     optimisticMapRef.current.set(clientTempId, updated);
     setMessages((prev) => prev.map((item) => item.clientTempId === clientTempId ? updated : item));
@@ -469,7 +471,11 @@ export function useMessages(
 
       const completed: ChatMessage = {
         ...previous,
-        attachment: { ...attachment, uploadState: undefined, uploadProgress: undefined },
+        attachment: {
+          ...attachment,
+          uploadState: undefined,
+          uploadProgress: undefined
+        },
         status: 'sending',
         errorMessage: undefined
       };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Clock,
   Check,
@@ -35,6 +35,16 @@ interface MessageBubbleProps {
 }
 
 const QUICK_REACTIONS = ['👍', '❤️', '🔥', '😂', '🎉', '🚀', '🎓', '☕'];
+const signedMediaUrlCache = new Map<string, string>();
+
+function cacheSignedMediaUrl(key: string, url: string): void {
+  signedMediaUrlCache.delete(key);
+  signedMediaUrlCache.set(key, url);
+  if (signedMediaUrlCache.size > 200) {
+    const oldestKey = signedMediaUrlCache.keys().next().value;
+    if (oldestKey) signedMediaUrlCache.delete(oldestKey);
+  }
+}
 
 function getSenderColor(name: string): string {
   const colors = [
@@ -76,16 +86,40 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const storedUrl = [message.attachment?.downloadUrl, message.attachment?.url].find((url) =>
     isOpenableS3Url(url)
   ) || '';
+  const mediaCacheKey = `${message.roomId}:${message.id}:${message.attachment?.key || ''}`;
+  const cachedMediaUrl = signedMediaUrlCache.get(mediaCacheKey) || '';
+  const initialMediaUrl = isOpenableS3Url(cachedMediaUrl)
+    ? cachedMediaUrl
+    : localPreview || storedUrl;
 
-  const [mediaUrl, setMediaUrl] = useState<string>(localPreview || storedUrl);
+  const [mediaUrl, setMediaUrl] = useState<string>(initialMediaUrl);
+  const mediaUrlRef = useRef(mediaUrl);
+  mediaUrlRef.current = mediaUrl;
   const [mediaLoading, setMediaLoading] = useState<boolean>(false);
   const [mediaFailed, setMediaFailed] = useState<boolean>(false);
+
+  const updateMediaUrl = (url: string) => {
+    const previousUrl = mediaUrlRef.current;
+    if (previousUrl.startsWith('blob:') && previousUrl !== url) {
+      URL.revokeObjectURL(previousUrl);
+    }
+    mediaUrlRef.current = url;
+    setMediaUrl(url);
+  };
+
+  useEffect(() => () => {
+    // Keep a preview alive while its upload is pending. Once the upload finishes,
+    // a virtualized row can release it if it scrolls out before S3 resolves.
+    if (!message.attachment?.previewUrl && mediaUrlRef.current.startsWith('blob:')) {
+      URL.revokeObjectURL(mediaUrlRef.current);
+    }
+  }, [message.attachment?.previewUrl]);
 
   useEffect(() => {
     let isCurrent = true;
     const att = message.attachment;
     if (!att) {
-      setMediaUrl('');
+      updateMediaUrl('');
       setMediaLoading(false);
       setMediaFailed(false);
       return;
@@ -98,8 +132,30 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     const direct = [att.downloadUrl, att.url].find((url) => isOpenableS3Url(url) && !url?.startsWith('blob:') && !url?.startsWith('data:')) || '';
     const key = att.key || extractKeyFromS3Url(att.url) || extractKeyFromS3Url(att.downloadUrl);
 
-    setMediaUrl(preview || direct);
     setMediaFailed(false);
+
+    if (direct && isOpenableS3Url(direct)) {
+      updateMediaUrl(direct);
+      setMediaLoading(false);
+      return;
+    }
+
+    const cached = signedMediaUrlCache.get(mediaCacheKey) || '';
+    if (cached && isOpenableS3Url(cached)) {
+      updateMediaUrl(cached);
+      setMediaLoading(false);
+      return;
+    }
+    if (cached) signedMediaUrlCache.delete(mediaCacheKey);
+    if (preview) updateMediaUrl(preview);
+    else if (!mediaUrlRef.current.startsWith('blob:')) updateMediaUrl('');
+
+    // Upload progress changes every few milliseconds. Keep the optimistic
+    // attachment stable while transferring and avoid starting download work.
+    if (att.uploadState === 'uploading') {
+      setMediaLoading(false);
+      return;
+    }
 
     // Refresh when the stored URL is missing, unsigned, a PutObject URL, or expired.
     if (!key || (direct && isOpenableS3Url(direct))) {
@@ -122,7 +178,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       .then((signedUrl) => {
         if (!isCurrent) return;
         if (signedUrl) {
-          setMediaUrl(signedUrl);
+          cacheSignedMediaUrl(mediaCacheKey, signedUrl);
+          updateMediaUrl(signedUrl);
           setMediaFailed(false);
         } else if (!preview) {
           setMediaFailed(true);
@@ -138,7 +195,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     return () => {
       isCurrent = false;
     };
-  }, [message.attachment, message.roomId, message.id, message.status]);
+  }, [
+    mediaCacheKey,
+    message.attachment?.key,
+    message.attachment?.previewUrl,
+    message.attachment?.downloadUrl,
+    message.attachment?.url,
+    message.attachment?.fileName,
+    message.attachment?.mimeType,
+    message.attachment?.uploadState,
+    message.roomId,
+    message.id,
+    message.status
+  ]);
 
   const handleMediaError = () => {
     const key =
@@ -151,7 +220,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       mimeType: message.attachment?.mimeType || message.attachment?.type
     }).then((freshUrl) => {
       if (freshUrl && freshUrl !== mediaUrl) {
-        setMediaUrl(freshUrl);
+        cacheSignedMediaUrl(mediaCacheKey, freshUrl);
+        updateMediaUrl(freshUrl);
         setMediaFailed(false);
       } else {
         setMediaFailed(true);
@@ -162,6 +232,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const openStoredFile = async (event?: React.MouseEvent) => {
     event?.preventDefault();
     event?.stopPropagation();
+    if (message.attachment?.uploadState === 'uploading') return;
     const popup = window.open('about:blank', '_blank');
     if (popup) popup.opener = null;
     const key =
@@ -175,14 +246,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         fileName: message.attachment?.fileName || message.attachment?.name,
         mimeType: message.attachment?.mimeType || message.attachment?.type
       });
-      if (fresh) url = fresh;
+      if (fresh) {
+        url = fresh;
+        cacheSignedMediaUrl(mediaCacheKey, fresh);
+      }
     }
     if (!url) {
       popup?.close();
       setMediaFailed(true);
       return;
     }
-    setMediaUrl(url);
+    updateMediaUrl(url);
     if (popup) {
       popup.location.href = url;
     } else {
