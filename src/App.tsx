@@ -8,6 +8,10 @@ import { LightboxModal } from './components/modals/LightboxModal';
 import { PwaInstallModal } from './components/modals/PwaInstallModal';
 import { NewDirectMessageModal } from './components/modals/NewDirectMessageModal';
 import { ToastMessage } from './components/common/Toast';
+import { IncomingCallModal } from './components/calling/IncomingCallModal';
+import { OutgoingCallModal } from './components/calling/OutgoingCallModal';
+import { CallWindow } from './components/calling/CallWindow';
+import { CallHistoryModal } from './components/calling/CallHistoryModal';
 
 import { useAuth } from './hooks/useAuth';
 import { usePresence } from './hooks/usePresence';
@@ -17,6 +21,7 @@ import { useAudio } from './hooks/useAudio';
 import { useHaptics } from './hooks/useHaptics';
 import { usePwaInstall } from './hooks/usePwaInstall';
 import { useDirectMessages } from './hooks/useDirectMessages';
+import { useCalling } from './hooks/useCalling';
 
 import { db, collection, addDoc, onSnapshot } from './services/firebase';
 import { localCache } from './services/indexedDbCache';
@@ -129,6 +134,7 @@ export const App: React.FC = () => {
   const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const [lightboxName, setLightboxName] = useState<string | undefined>(undefined);
   const [installOnboardingOpen, setInstallOnboardingOpen] = useState(false);
+  const [callHistoryModalOpen, setCallHistoryModalOpen] = useState(false);
   const localPreviewUrlsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => () => {
@@ -204,6 +210,32 @@ export const App: React.FC = () => {
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // Amazon Chime SDK Audio & Video Calling Hook
+  const {
+    activeCall,
+    incomingCall,
+    meetingCredentials,
+    callHistory,
+    startCall,
+    acceptCall,
+    rejectCall,
+    endCall
+  } = useCalling(currentUser, addToast);
+
+  const handleStartVoiceCall = useCallback(
+    (peer: ChatUser) => {
+      void startCall(peer, 'voice');
+    },
+    [startCall]
+  );
+
+  const handleStartVideoCall = useCallback(
+    (peer: ChatUser) => {
+      void startCall(peer, 'video');
+    },
+    [startCall]
+  );
 
   // Sync custom channels from Firestore & cache in IndexedDB.
   // Wait for auth — an early listener is rejected and does not reconnect.
@@ -526,6 +558,7 @@ export const App: React.FC = () => {
     createChannelModalOpen ||
     newDirectMessageModalOpen ||
     installOnboardingOpen ||
+    callHistoryModalOpen ||
     lightboxUrl ||
     isSidebarOpenMobile
   );
@@ -548,6 +581,8 @@ export const App: React.FC = () => {
         setCreateChannelModalOpen(false);
       } else if (newDirectMessageModalOpen) {
         setNewDirectMessageModalOpen(false);
+      } else if (callHistoryModalOpen) {
+        setCallHistoryModalOpen(false);
       } else if (installOnboardingOpen) {
         setInstallOnboardingOpen(false);
       } else if (isSidebarOpenMobile) {
@@ -565,6 +600,7 @@ export const App: React.FC = () => {
     channelInfoModalOpen,
     createChannelModalOpen,
     newDirectMessageModalOpen,
+    callHistoryModalOpen,
     installOnboardingOpen,
     isSidebarOpenMobile
   ]);
@@ -631,6 +667,9 @@ export const App: React.FC = () => {
         unreadCounts={unreadCounts}
         canInstallApp={Boolean(currentUser) && canInstall && !installOnboardingOpen}
         onInstallApp={promptInstall}
+        onStartVoiceCall={handleStartVoiceCall}
+        onStartVideoCall={handleStartVideoCall}
+        onOpenCallHistory={() => setCallHistoryModalOpen(true)}
       />
 
       {/* Modals & Overlays */}
@@ -660,6 +699,8 @@ export const App: React.FC = () => {
         room={activeRoom}
         onlineMembers={onlineMembers}
         latencyMs={latencyMs}
+        currentUser={currentUser}
+        onStartCall={startCall}
       />
 
       <CreateChannelModal
@@ -694,6 +735,34 @@ export const App: React.FC = () => {
           }}
         />
       )}
+
+      {/* Real-time Voice & Video Calling Modals & Overlays */}
+      <IncomingCallModal
+        incomingCall={incomingCall}
+        onAccept={acceptCall}
+        onReject={rejectCall}
+      />
+
+      <OutgoingCallModal
+        activeCall={activeCall?.status !== 'connected' ? activeCall : null}
+        onCancel={endCall}
+      />
+
+      {activeCall && activeCall.status === 'connected' && currentUser && (
+        <CallWindow
+          activeCall={activeCall}
+          credentials={meetingCredentials}
+          currentUserId={currentUser.uid}
+          onEndCall={endCall}
+        />
+      )}
+
+      <CallHistoryModal
+        isOpen={callHistoryModalOpen}
+        onClose={() => setCallHistoryModalOpen(false)}
+        callHistory={callHistory}
+        onStartCall={startCall}
+      />
     </>
   );
 };

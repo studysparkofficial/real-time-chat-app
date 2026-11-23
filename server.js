@@ -1,10 +1,21 @@
-const express = require('express');
-const http = require('http');
-const path = require('path');
-const { Server } = require('socket.io');
+import 'dotenv/config';
+import express from 'express';
+import http from 'http';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import cors from 'cors';
+import { Server } from 'socket.io';
+import { createCallRouter } from './backend/callRoutes.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = http.createServer(app);
+
+app.use(cors({ origin: '*' }));
+app.use(express.json());
+
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -13,7 +24,10 @@ const io = new Server(server, {
   maxHttpBufferSize: 1e7 // 10MB limit for file/image uploads
 });
 
-const DEFAULT_PORT = 3000;
+// Mount Chime SDK calling API router
+app.use('/api/calls', createCallRouter());
+
+const DEFAULT_PORT = 3001;
 const PORT = Number(process.env.PORT) || DEFAULT_PORT;
 let activePort = PORT;
 
@@ -62,6 +76,9 @@ const roomMessages = {
 
 // Map socket.id -> user info { id, username, avatar, room, status }
 const activeUsers = new Map();
+
+// Map user.uid -> Set of socket.id for direct call signaling
+const userSockets = new Map();
 
 // Typing users per room: room -> Set of usernames
 const typingUsers = new Map();
@@ -320,8 +337,75 @@ io.on('connection', (socket) => {
     }
   });
 
-  // 8. Disconnect
+  // 8. Call Signaling Events (One-to-one voice & video)
+  socket.on('register_user', ({ uid }) => {
+    if (!uid) return;
+    socket.userId = uid;
+    if (!userSockets.has(uid)) {
+      userSockets.set(uid, new Set());
+    }
+    userSockets.get(uid).add(socket.id);
+  });
+
+  socket.on('call:initiate', ({ toUid, callSession }) => {
+    if (!toUid) return;
+    const targets = userSockets.get(toUid);
+    if (targets && targets.size > 0) {
+      targets.forEach((sockId) => {
+        io.to(sockId).emit('call:incoming', callSession);
+      });
+    }
+  });
+
+  socket.on('call:ringing', ({ toUid, callId }) => {
+    if (!toUid) return;
+    const targets = userSockets.get(toUid);
+    if (targets) {
+      targets.forEach((sockId) => io.to(sockId).emit('call:ringing', { callId }));
+    }
+  });
+
+  socket.on('call:accept', ({ toUid, callId }) => {
+    if (!toUid) return;
+    const targets = userSockets.get(toUid);
+    if (targets) {
+      targets.forEach((sockId) => io.to(sockId).emit('call:accepted', { callId }));
+    }
+  });
+
+  socket.on('call:reject', ({ toUid, callId, reason }) => {
+    if (!toUid) return;
+    const targets = userSockets.get(toUid);
+    if (targets) {
+      targets.forEach((sockId) => io.to(sockId).emit('call:rejected', { callId, reason }));
+    }
+  });
+
+  socket.on('call:busy', ({ toUid, callId }) => {
+    if (!toUid) return;
+    const targets = userSockets.get(toUid);
+    if (targets) {
+      targets.forEach((sockId) => io.to(sockId).emit('call:busy', { callId }));
+    }
+  });
+
+  socket.on('call:end', ({ toUid, callId }) => {
+    if (!toUid) return;
+    const targets = userSockets.get(toUid);
+    if (targets) {
+      targets.forEach((sockId) => io.to(sockId).emit('call:ended', { callId }));
+    }
+  });
+
+  // 9. Disconnect
   socket.on('disconnect', () => {
+    if (socket.userId && userSockets.has(socket.userId)) {
+      userSockets.get(socket.userId).delete(socket.id);
+      if (userSockets.get(socket.userId).size === 0) {
+        userSockets.delete(socket.userId);
+      }
+    }
+
     const user = activeUsers.get(socket.id);
     if (user) {
       const room = user.room;

@@ -13,6 +13,16 @@ export default defineConfig({
   server: {
     port: 3000,
     open: true,
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true
+      },
+      '/socket.io': {
+        target: 'http://localhost:3001',
+        ws: true
+      }
+    }
   },
   build: {
     outDir: 'dist',
@@ -23,6 +33,7 @@ export default defineConfig({
           vendor: ['react', 'react-dom'],
           firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
           virtual: ['@tanstack/react-virtual'],
+          chime: ['amazon-chime-sdk-js'],
         },
       },
     },

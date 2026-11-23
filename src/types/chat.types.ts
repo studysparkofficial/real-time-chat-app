@@ -101,3 +101,54 @@ export interface UserPreferences {
   soundEnabled: boolean;
   hapticsEnabled: boolean;
 }
+
+export type CallType = 'voice' | 'video';
+
+export type CallStatus =
+  | 'idle'
+  | 'initiating'
+  | 'ringing'
+  | 'accepted'
+  | 'connecting'
+  | 'connected'
+  | 'rejected'
+  | 'busy'
+  | 'missed'
+  | 'ended'
+  | 'failed';
+
+export interface CallParticipant {
+  uid: string;
+  displayName: string;
+  photoURL?: string | null;
+}
+
+export interface CallSession {
+  id: string; // callId
+  conversationId?: string;
+  caller: CallParticipant;
+  recipient: CallParticipant;
+  callType: CallType;
+  status: CallStatus;
+  meetingId?: string;
+  createdAt: number;
+  answeredAt?: number;
+  endedAt?: number;
+  endedReason?: 'completed' | 'declined' | 'timeout' | 'canceled' | 'busy' | 'network_error';
+}
+
+export interface ChimeMeetingCredentials {
+  Meeting: any;
+  Attendee: any;
+}
+
+export interface CallHistoryItem {
+  id: string;
+  peer: CallParticipant;
+  direction: 'incoming' | 'outgoing';
+  callType: CallType;
+  status: 'completed' | 'missed' | 'rejected' | 'busy' | 'canceled';
+  durationSeconds: number;
+  timestamp: number;
+}
+

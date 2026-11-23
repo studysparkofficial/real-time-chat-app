@@ -68,6 +68,9 @@ interface AppLayoutProps {
   unreadCounts: Record<string, number>;
   canInstallApp: boolean;
   onInstallApp: () => Promise<void>;
+  onStartVoiceCall?: (peer: ChatUser) => void;
+  onStartVideoCall?: (peer: ChatUser) => void;
+  onOpenCallHistory?: () => void;
 }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({
@@ -120,7 +123,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onDismissToast,
   unreadCounts,
   canInstallApp,
-  onInstallApp
+  onInstallApp,
+  onStartVoiceCall,
+  onStartVideoCall,
+  onOpenCallHistory
 }) => {
   const handleToggleSidebar = () => {
     if (typeof window !== 'undefined' && window.innerWidth <= 768) {
@@ -185,6 +191,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           onToggleSidebar={handleToggleSidebar}
           onOpenChannelInfo={onOpenChannelInfo}
           onOpenAccountModal={onOpenAccountModal}
+          onStartVoiceCall={onStartVoiceCall}
+          onStartVideoCall={onStartVideoCall}
+          onOpenCallHistory={onOpenCallHistory}
         />
 
         {canInstallApp && (

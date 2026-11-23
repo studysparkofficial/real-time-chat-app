@@ -1,5 +1,5 @@
 import React from 'react';
-import { MoreVertical, Hash, Moon, Sun, Users } from 'lucide-react';
+import { MoreVertical, Hash, Moon, Sun, Users, Phone, Video, Clock } from 'lucide-react';
 import { ChatRoom, ChatUser } from '../../types/chat.types';
 import { Avatar } from '../common/Avatar';
 
@@ -13,6 +13,9 @@ interface HeaderProps {
   onToggleSidebar: () => void;
   onOpenChannelInfo: () => void;
   onOpenAccountModal: () => void;
+  onStartVoiceCall?: (peer: ChatUser) => void;
+  onStartVideoCall?: (peer: ChatUser) => void;
+  onOpenCallHistory?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,7 +27,10 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTheme,
   onToggleSidebar,
   onOpenChannelInfo,
-  onOpenAccountModal
+  onOpenAccountModal,
+  onStartVoiceCall,
+  onStartVideoCall,
+  onOpenCallHistory
 }) => {
   const isEmoji = currentRoom.icon && currentRoom.icon !== '#';
 
@@ -150,8 +156,43 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Right Action Icons: Channel Info, Theme Toggle, Profile Avatar */}
+      {/* Right Action Icons: Calling, Channel Info, Call History, Theme Toggle, Profile */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {directUser && onStartVoiceCall && (
+          <button
+            type="button"
+            onClick={() => onStartVoiceCall(directUser)}
+            className="header-action-btn"
+            title={`Start Voice Call with ${directUser.displayName}`}
+            style={{ color: '#10b981' }}
+          >
+            <Phone size={20} />
+          </button>
+        )}
+
+        {directUser && onStartVideoCall && (
+          <button
+            type="button"
+            onClick={() => onStartVideoCall(directUser)}
+            className="header-action-btn"
+            title={`Start Video Call with ${directUser.displayName}`}
+            style={{ color: 'var(--accent-primary, #6366f1)' }}
+          >
+            <Video size={20} />
+          </button>
+        )}
+
+        {currentUser && onOpenCallHistory && (
+          <button
+            type="button"
+            onClick={onOpenCallHistory}
+            className="header-action-btn"
+            title="Recent Call History"
+          >
+            <Clock size={20} />
+          </button>
+        )}
+
         {!directUser && <button
           type="button"
           onClick={onOpenChannelInfo}

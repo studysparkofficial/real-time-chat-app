@@ -1,6 +1,6 @@
 import React from 'react';
-import { X, Hash, Activity, Users, Radio, MapPin } from 'lucide-react';
-import { ChatRoom, ChatUser } from '../../types/chat.types';
+import { X, Hash, Activity, Users, Radio, MapPin, Phone, Video } from 'lucide-react';
+import { ChatRoom, ChatUser, CallType } from '../../types/chat.types';
 import { Avatar } from '../common/Avatar';
 
 interface ChannelInfoModalProps {
@@ -9,6 +9,8 @@ interface ChannelInfoModalProps {
   room: ChatRoom;
   onlineMembers: ChatUser[];
   latencyMs: number;
+  currentUser?: ChatUser | null;
+  onStartCall?: (peer: ChatUser, type: CallType) => void;
 }
 
 export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
@@ -16,7 +18,9 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
   onClose,
   room,
   onlineMembers,
-  latencyMs
+  latencyMs,
+  currentUser,
+  onStartCall
 }) => {
   if (!isOpen) return null;
 
@@ -266,6 +270,35 @@ export const ChannelInfoModal: React.FC<ChannelInfoModalProps> = ({
                       {member.bio || 'JNU Scholar / Student'}
                     </div>
                   </div>
+
+                  {currentUser && currentUser.uid !== member.uid && onStartCall && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onStartCall(member, 'voice');
+                        }}
+                        className="header-action-btn"
+                        style={{ padding: '6px', borderRadius: '8px' }}
+                        title={`Voice Call ${member.displayName}`}
+                      >
+                        <Phone size={15} color="#10b981" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onStartCall(member, 'video');
+                        }}
+                        className="header-action-btn"
+                        style={{ padding: '6px', borderRadius: '8px' }}
+                        title={`Video Call ${member.displayName}`}
+                      >
+                        <Video size={15} color="var(--accent-primary)" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))
             )}
