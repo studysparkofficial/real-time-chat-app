@@ -36,12 +36,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     try {
       if (mode === 'signin') {
-        if (!email || !password) throw new Error('Please fill in both email and password.');
-        await onEmailSignIn(email, password);
+        if (!email.trim() || !password) throw new Error('Please fill in both email and password.');
+        const normalizedEmail = email.trim();
+        if (!normalizedEmail.toLowerCase().endsWith('@jnu.ac.in')) {
+          setError('Access is restricted to @jnu.ac.in email addresses.');
+          return;
+        }
+        await onEmailSignIn(normalizedEmail, password);
       } else if (mode === 'signup') {
-        if (!email || !password || !displayName) throw new Error('Please complete all fields.');
+        if (!email.trim() || !password || !displayName) throw new Error('Please complete all fields.');
         if (password.length < 6) throw new Error('Password must be at least 6 characters.');
-        await onEmailSignUp(email, password, displayName);
+        const normalizedEmail = email.trim();
+        if (!normalizedEmail.toLowerCase().endsWith('@jnu.ac.in')) {
+          setError('Access is restricted to @jnu.ac.in email addresses.');
+          return;
+        }
+        await onEmailSignUp(normalizedEmail, password, displayName);
       } else if (mode === 'guest') {
         await onGuestSignIn(guestName.trim() || undefined);
       }
@@ -378,7 +388,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <input
                     type="email"
                     required
-                    placeholder="scholar@jnu.ac.in or gmail"
+                    placeholder="name@jnu.ac.in"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     style={{
