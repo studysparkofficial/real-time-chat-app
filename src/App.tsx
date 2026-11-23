@@ -137,24 +137,26 @@ export const App: React.FC = () => {
   }, []);
 
   // Keep the chat shell fitted to the visible viewport while the mobile keyboard
-  // is open. The layout viewport stays stable; only the chat area follows the
-  // visual viewport, keeping the composer above the keyboard without page zoom.
+  // is open, without unwanted page zooming or horizontal/vertical shifting.
   useEffect(() => {
     const root = document.documentElement;
     const visualViewport = window.visualViewport;
     const updateViewportHeight = () => {
-      const height = visualViewport && visualViewport.scale <= 1.01
-        ? visualViewport.height
-        : window.innerHeight;
+      const height = visualViewport ? visualViewport.height : window.innerHeight;
       root.style.setProperty('--app-viewport-height', `${Math.round(height)}px`);
+      if (window.scrollY !== 0 || window.scrollX !== 0) {
+        window.scrollTo(0, 0);
+      }
     };
 
     updateViewportHeight();
     visualViewport?.addEventListener('resize', updateViewportHeight);
+    visualViewport?.addEventListener('scroll', updateViewportHeight);
     window.addEventListener('resize', updateViewportHeight);
     window.addEventListener('orientationchange', updateViewportHeight);
     return () => {
       visualViewport?.removeEventListener('resize', updateViewportHeight);
+      visualViewport?.removeEventListener('scroll', updateViewportHeight);
       window.removeEventListener('resize', updateViewportHeight);
       window.removeEventListener('orientationchange', updateViewportHeight);
       root.style.removeProperty('--app-viewport-height');

@@ -79,6 +79,13 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     onTyping();
   };
 
+  const handleFocus = () => {
+    // Prevent mobile keyboard from shifting or scrolling window out of frame
+    if (window.scrollY !== 0 || window.scrollX !== 0) {
+      window.scrollTo(0, 0);
+    }
+  };
+
   const handleSend = async () => {
     if (!text.trim() && !stagedFile) return;
     const currentText = text;
@@ -405,6 +412,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
               onChange={handleChange}
               onKeyDown={handleKeyDown}
               onPaste={onClipboardPaste}
+              onFocus={handleFocus}
             />
 
             {/* Mic voice note recording trigger (shown when no text) */}
