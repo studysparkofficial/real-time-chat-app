@@ -38,7 +38,7 @@ service cloud.firestore {
     }
 
     function hasField(data, field) {
-      return data.keys().hasAny([field]);
+      return field in data;
     }
 
     function isValidQuietHours(data) {
@@ -91,7 +91,7 @@ service cloud.firestore {
     function isValidMentions(data, senderUid) {
       return data is list
         && data.size() <= 10
-        && !data.hasAny([senderUid]);
+        && (data.size() == 0 || !data.hasAny([senderUid]));
     }
 
     // Conversation documents are created only for direct chats. Their message

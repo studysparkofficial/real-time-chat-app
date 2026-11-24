@@ -88,7 +88,7 @@ function storedAttachment(attachment: MessageAttachment): MessageAttachment {
 }
 
 function firestoreMessagePayload(message: ChatMessage): Record<string, unknown> {
-  return {
+  const payload: Record<string, unknown> = {
     text: message.text,
     sender: {
       uid: message.sender.uid,
@@ -101,9 +101,14 @@ function firestoreMessagePayload(message: ChatMessage): Record<string, unknown> 
     reactions: message.reactions || {},
     clientTempId: message.clientTempId || message.id,
     attachment: message.attachment?.key ? storedAttachment(message.attachment) : null,
-    replyTo: message.replyTo || null,
-    mentions: message.mentions || []
+    replyTo: message.replyTo || null
   };
+
+  if (Array.isArray(message.mentions) && message.mentions.length > 0) {
+    payload.mentions = message.mentions;
+  }
+
+  return payload;
 }
 
 async function persistMessage(message: ChatMessage): Promise<void> {
