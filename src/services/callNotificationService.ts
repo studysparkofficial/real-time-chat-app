@@ -2,14 +2,13 @@
  * Web Audio API Call Notification Service
  * Generates realistic incoming ringtone, outgoing ringback tone,
  * and call status chimes without external audio assets.
- * Also handles browser notification banners and mobile haptics.
+ * Also handles mobile haptics. Browser notifications are displayed by the service worker.
  */
 
 class CallNotificationService {
   private ctx: AudioContext | null = null;
   private incomingInterval: number | null = null;
   private outgoingInterval: number | null = null;
-  private activeNotification: Notification | null = null;
 
   private getContext(): AudioContext | null {
     if (!this.ctx && typeof window !== 'undefined') {
@@ -24,55 +23,6 @@ class CallNotificationService {
       void this.ctx.resume();
     }
     return this.ctx;
-  }
-
-  /**
-   * Request browser Notification API permission
-   */
-  public async requestNotificationPermission(): Promise<boolean> {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      return false;
-    }
-    if (Notification.permission === 'granted') {
-      return true;
-    }
-    if (Notification.permission !== 'denied') {
-      const perm = await Notification.requestPermission();
-      return perm === 'granted';
-    }
-    return false;
-  }
-
-  /**
-   * Show desktop / mobile system notification for incoming call
-   */
-  public showIncomingCallNotification(callerName: string, callType: 'voice' | 'video'): void {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    if (Notification.permission === 'granted') {
-      try {
-        this.activeNotification = new Notification(`Incoming ${callType === 'video' ? 'Video' : 'Voice'} Call`, {
-          body: `${callerName} is calling you on PulseChat`,
-          icon: '/jnu-logo.png',
-          badge: '/favicon.png',
-          tag: 'incoming_call',
-          requireInteraction: true
-        });
-
-        this.activeNotification.onclick = () => {
-          window.focus();
-          this.activeNotification?.close();
-        };
-      } catch {
-        // Notification creation error suppressed
-      }
-    }
-  }
-
-  public clearIncomingCallNotification(): void {
-    if (this.activeNotification) {
-      this.activeNotification.close();
-      this.activeNotification = null;
-    }
   }
 
   /**
@@ -105,7 +55,6 @@ class CallNotificationService {
       clearInterval(this.incomingInterval);
       this.incomingInterval = null;
     }
-    this.clearIncomingCallNotification();
     if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
       try {
         navigator.vibrate(0);

@@ -39,6 +39,61 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+self.addEventListener('push', (event) => {
+  if (!event.data) return;
+  let payload;
+  try {
+    payload = event.data.json();
+  } catch {
+    payload = { title: 'PulseChat', options: { body: event.data.text() } };
+  }
+
+  event.waitUntil((async () => {
+    const options = payload.options && typeof payload.options === 'object' ? payload.options : {};
+    if (payload.action === 'clear') {
+      const notifications = await self.registration.getNotifications({ tag: options.tag });
+      notifications.forEach((notification) => notification.close());
+      return;
+    }
+
+    const title = String(payload.title || 'PulseChat').slice(0, 100);
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const visibleClient = windows.find((client) => client.visibilityState === 'visible');
+    if (visibleClient) {
+      visibleClient.postMessage({ type: 'pulsechat-push', payload });
+      return;
+    }
+
+    await self.registration.showNotification(title, {
+      body: String(options.body || 'You have a new notification').slice(0, 180),
+      icon: options.icon || '/pwa-icon-192.png',
+      badge: options.badge || '/favicon.png',
+      tag: String(options.tag || 'pulsechat-notification').slice(0, 100),
+      renotify: false,
+      requireInteraction: Boolean(options.requireInteraction),
+      silent: options.silent === true,
+      data: options.data && typeof options.data === 'object' ? options.data : { url: '/' }
+    });
+  })());
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const requestedUrl = new URL(event.notification.data?.url || '/', self.location.origin);
+  const url = (requestedUrl.origin === self.location.origin ? requestedUrl : new URL('/', self.location.origin)).href;
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+        await client.focus();
+        client.postMessage({ type: 'pulsechat-notification-click', url });
+        return;
+      }
+    }
+    await self.clients.openWindow(url);
+  })());
+});
+
 self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);

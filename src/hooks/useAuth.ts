@@ -11,7 +11,9 @@ import {
   signInEmail,
   signUpEmail,
   signInGuest,
-  logOut
+  logOut,
+  functions,
+  httpsCallable
 } from '../services/firebase';
 import { ChatUser, UserPreferences, UserPresenceStatus } from '../types/chat.types';
 
@@ -22,6 +24,41 @@ const DEFAULT_PREFS: UserPreferences = {
   soundEnabled: true,
   hapticsEnabled: true,
 };
+
+function getBrowserDeviceId(): string {
+  const key = 'pulsechat_browser_device_id';
+  try {
+    const existing = localStorage.getItem(key);
+    if (existing) return existing;
+    const id = typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `device_${Date.now()}_${Math.random().toString(36).slice(2, 18)}`;
+    localStorage.setItem(key, id);
+    return id;
+  } catch {
+    try {
+      const sessionKey = `${key}_session`;
+      const existing = sessionStorage.getItem(sessionKey);
+      if (existing) return existing;
+      const id = `device_${Date.now()}_${Math.random().toString(36).slice(2, 18)}`;
+      sessionStorage.setItem(sessionKey, id);
+      return id;
+    } catch {
+      return `device_${Date.now()}_${Math.random().toString(36).slice(2, 18)}`;
+    }
+  }
+}
+
+function browserDeviceLabel(): string {
+  const agent = navigator.userAgent;
+  if (/iPhone|iPad|iPod/i.test(agent)) return 'Apple mobile browser';
+  if (/Android/i.test(agent)) return 'Android browser';
+  if (/Edg\//i.test(agent)) return 'Edge browser';
+  if (/Firefox\//i.test(agent)) return 'Firefox browser';
+  if (/Chrome\//i.test(agent)) return 'Chrome browser';
+  if (/Safari\//i.test(agent)) return 'Safari browser';
+  return 'Browser';
+}
 
 export function useAuth() {
   const [user, setUser] = useState<ChatUser | null>(null);
@@ -66,6 +103,9 @@ export function useAuth() {
             lastSeen: Date.now()
           };
           setUser(chatUser);
+          const recordSession = httpsCallable(functions, 'recordNewSession');
+          void recordSession({ deviceId: getBrowserDeviceId(), deviceLabel: browserDeviceLabel() })
+            .catch((error) => console.warn('[Security] Session notification could not be recorded:', error));
           void setDoc(
             doc(db, 'user_profiles', fbUser.uid),
             {

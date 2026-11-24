@@ -29,10 +29,9 @@ export function useCalling(
   activeCallRef.current = activeCall;
   incomingCallRef.current = incomingCall;
 
-  // Request browser notification permission once user is signed in
+  // Browser push permission is requested only after the user explicitly enables alerts.
   useEffect(() => {
     if (currentUser?.uid) {
-      void callNotificationService.requestNotificationPermission();
       callSignalingService.registerUser(currentUser.uid);
       void callSignalingService.getCallHistory(currentUser.uid).then((history) => {
         setCallHistory(history);
@@ -95,11 +94,6 @@ export function useCalling(
 
         setIncomingCall(call);
         callNotificationService.startIncomingRingtone();
-        callNotificationService.showIncomingCallNotification(
-          call.caller.displayName,
-          call.callType
-        );
-
         // Ringing timeout (35s) for incoming call
         clearCallTimeout();
         callTimeoutRef.current = window.setTimeout(() => {

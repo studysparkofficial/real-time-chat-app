@@ -18,7 +18,9 @@ export const ALLOWED_MIME_TYPES = {
 };
 
 export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
-export const API_BASE_URL = 'https://0sz03xhubg.execute-api.ap-southeast-2.amazonaws.com/prod';
+export const API_BASE_URL = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? `http://${window.location.hostname}:${Number(window.location.port) || 3001}/api/media`
+  : 'https://0sz03xhubg.execute-api.ap-southeast-2.amazonaws.com/prod';
 
 // Client-side presigned download URL cache (key -> { url, expiresAt })
 const downloadUrlCache = new Map();

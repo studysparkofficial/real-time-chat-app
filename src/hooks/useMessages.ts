@@ -101,7 +101,8 @@ function firestoreMessagePayload(message: ChatMessage): Record<string, unknown> 
     reactions: message.reactions || {},
     clientTempId: message.clientTempId || message.id,
     attachment: message.attachment?.key ? storedAttachment(message.attachment) : null,
-    replyTo: message.replyTo || null
+    replyTo: message.replyTo || null,
+    mentions: message.mentions || []
   };
 }
 
@@ -415,7 +416,8 @@ export function useMessages(
     async (
       text: string,
       attachment?: MessageAttachment | null,
-      replyTo?: MessageReplyReference | null
+      replyTo?: MessageReplyReference | null,
+      mentions: string[] = []
     ) => {
       if ((!text || !text.trim()) && !attachment) return;
       if (!currentUser) return;
@@ -436,6 +438,7 @@ export function useMessages(
         attachment: attachment || null,
         reactions: {},
         replyTo: replyTo || null,
+        mentions,
         clientTempId,
         isOptimistic: true
       };
@@ -492,7 +495,8 @@ export function useMessages(
     (
       text: string,
       attachment: MessageAttachment,
-      replyTo?: MessageReplyReference | null
+      replyTo?: MessageReplyReference | null,
+      mentions: string[] = []
     ): string | null => {
       if (!currentUser) return null;
 
@@ -512,6 +516,7 @@ export function useMessages(
         attachment: { ...attachment, uploadState: 'uploading', uploadProgress: 0, retryAvailable: true },
         reactions: {},
         replyTo: replyTo || null,
+        mentions,
         clientTempId,
         isOptimistic: true
       };

@@ -10,11 +10,12 @@ import {
   Trash2,
   Image as ImageIcon
 } from 'lucide-react';
-import { MessageReplyReference } from '../../types/chat.types';
+import { ChatUser, MessageReplyReference } from '../../types/chat.types';
 import { formatBytes } from '../../services/s3Service';
 
 interface ChatInputBarProps {
-  onSendMessage: (text: string, file?: File | null) => Promise<void>;
+  onSendMessage: (text: string, file?: File | null, mentions?: string[]) => Promise<void>;
+  mentionUsers?: ChatUser[];
   placeholder?: string;
   onTyping: () => void;
   replyTo: MessageReplyReference | null;
@@ -37,6 +38,7 @@ const COMMON_EMOJIS = ['🎓', '☕', '📚', '🏛️', '🔥', '👍', '❤️
 
 export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   onSendMessage,
+  mentionUsers = [],
   placeholder = 'Message #JNUverse… (paste photos or press Enter)',
   onTyping,
   replyTo,
@@ -56,6 +58,8 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
 }) => {
   const [text, setText] = useState('');
   const [showEmojiTray, setShowEmojiTray] = useState(false);
+  const [mentionIds, setMentionIds] = useState<string[]>([]);
+  const [mentionQuery, setMentionQuery] = useState<{ start: number; query: string; cursor: number } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -75,15 +79,51 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setText(e.target.value);
+    const value = e.target.value;
+    const cursor = e.target.selectionStart;
+    setText(value);
+    const beforeCursor = value.slice(0, cursor);
+    const match = beforeCursor.match(/(^|\s)@([^\s@]{0,40})$/u);
+    setMentionQuery(match
+      ? { start: cursor - match[2].length - 1, query: match[2].toLocaleLowerCase(), cursor }
+      : null);
     onTyping();
   };
 
+  const mentionCandidates = mentionQuery
+    ? mentionUsers
+      .filter((user) => user.displayName.toLocaleLowerCase().startsWith(mentionQuery.query))
+      .slice(0, 5)
+    : [];
+
+  const selectMention = (user: ChatUser) => {
+    if (!mentionQuery) return;
+    const before = text.slice(0, mentionQuery.start);
+    const after = text.slice(mentionQuery.cursor);
+    const insertion = `@${user.displayName} `;
+    const nextText = `${before}${insertion}${after}`;
+    const nextCursor = before.length + insertion.length;
+    setText(nextText);
+    setMentionQuery(null);
+    setMentionIds((previous) => previous.includes(user.uid) ? previous : [...previous, user.uid]);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+      textareaRef.current?.setSelectionRange(nextCursor, nextCursor);
+    });
+  };
+
   const handleFocus = () => {
-    // Prevent mobile keyboard from shifting or scrolling window out of frame
-    if (window.scrollY !== 0 || window.scrollX !== 0) {
+    // Prevent mobile keyboard from shifting, scrolling or zooming window out of frame
+    window.scrollTo(0, 0);
+    if (document.body.scrollTop !== 0) document.body.scrollTop = 0;
+    setTimeout(() => {
       window.scrollTo(0, 0);
-    }
+      if (document.body.scrollTop !== 0) document.body.scrollTop = 0;
+    }, 50);
+    setTimeout(() => {
+      window.scrollTo(0, 0);
+      if (document.body.scrollTop !== 0) document.body.scrollTop = 0;
+    }, 250);
   };
 
   const handleSend = async () => {
@@ -92,8 +132,12 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     setText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     setShowEmojiTray(false);
-
-    await onSendMessage(currentText, stagedFile);
+    setMentionQuery(null);
+    const activeMentions = mentionUsers
+      .filter((user) => mentionIds.includes(user.uid) && currentText.includes(`@${user.displayName}`))
+      .map((user) => user.uid);
+    await onSendMessage(currentText, stagedFile, activeMentions);
+    setMentionIds([]);
   };
 
   const handleCodeBlock = () => {
@@ -102,12 +146,12 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
     } else {
       setText((prev) => `\`\`\`javascript\n${prev}\n\`\`\``);
     }
-    textareaRef.current?.focus();
+    textareaRef.current?.focus({ preventScroll: true });
   };
 
   const handleEmojiSelect = (emoji: string) => {
     setText((prev) => prev + emoji);
-    textareaRef.current?.focus();
+    textareaRef.current?.focus({ preventScroll: true });
   };
 
   const formatRecordingTime = (secs: number) => {
@@ -303,6 +347,17 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         </div>
       )}
 
+      {mentionQuery && mentionCandidates.length > 0 && (
+        <div className="mention-suggestions" role="listbox" aria-label="Mention a user">
+          {mentionCandidates.map((user) => (
+            <button key={user.uid} type="button" role="option" onClick={() => selectMention(user)}>
+              <span className="mention-avatar">{user.displayName.slice(0, 1).toLocaleUpperCase()}</span>
+              <span>{user.displayName}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Main Input Pill Bar Container */}
       <div className="input-bar-container">
         {/* Voice Note Recording State vs Normal Input Pill */}
@@ -413,6 +468,11 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
               onKeyDown={handleKeyDown}
               onPaste={onClipboardPaste}
               onFocus={handleFocus}
+              style={{
+                fontSize: '16px',
+                WebkitTextSizeAdjust: '100%',
+                touchAction: 'manipulation'
+              }}
             />
 
             {/* Mic voice note recording trigger (shown when no text) */}

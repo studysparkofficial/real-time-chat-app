@@ -16,6 +16,7 @@ interface HeaderProps {
   onStartVoiceCall?: (peer: ChatUser) => void;
   onStartVideoCall?: (peer: ChatUser) => void;
   onOpenCallHistory?: () => void;
+  notificationCenter?: React.ReactNode;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -30,7 +31,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAccountModal,
   onStartVoiceCall,
   onStartVideoCall,
-  onOpenCallHistory
+  onOpenCallHistory,
+  notificationCenter
 }) => {
   const isEmoji = currentRoom.icon && currentRoom.icon !== '#';
 
@@ -158,6 +160,7 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Action Icons: Calling, Channel Info, Call History, Theme Toggle, Profile */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {notificationCenter}
         {directUser && onStartVoiceCall && (
           <button
             type="button"

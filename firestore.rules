@@ -41,6 +41,43 @@ service cloud.firestore {
       return data.keys().hasAny([field]);
     }
 
+    function isValidQuietHours(data) {
+      return data is map
+        && data.keys().hasOnly(['enabled', 'start', 'end', 'timeZone'])
+        && data.enabled is bool
+        && data.start is string
+        && data.start.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+        && data.end is string
+        && data.end.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+        && data.timeZone is string
+        && data.timeZone.size() <= 80;
+    }
+
+    function isValidNotificationSettings(data) {
+      return data.keys().hasOnly([
+          'personalMessages', 'groupMessages', 'mentions', 'replies', 'reactions',
+          'voiceCalls', 'videoCalls', 'missedCalls', 'groupAnnouncements',
+          'statusNotifications', 'securityNotifications', 'systemNotifications',
+          'pushEnabled', 'sounds', 'messagePreviews', 'quietHours'
+        ])
+        && (!hasField(data, 'personalMessages') || data.personalMessages is bool)
+        && (!hasField(data, 'groupMessages') || data.groupMessages is bool)
+        && (!hasField(data, 'mentions') || data.mentions is bool)
+        && (!hasField(data, 'replies') || data.replies is bool)
+        && (!hasField(data, 'reactions') || data.reactions is bool)
+        && (!hasField(data, 'voiceCalls') || data.voiceCalls is bool)
+        && (!hasField(data, 'videoCalls') || data.videoCalls is bool)
+        && (!hasField(data, 'missedCalls') || data.missedCalls is bool)
+        && (!hasField(data, 'groupAnnouncements') || data.groupAnnouncements is bool)
+        && (!hasField(data, 'statusNotifications') || data.statusNotifications is bool)
+        && (!hasField(data, 'securityNotifications') || data.securityNotifications is bool)
+        && (!hasField(data, 'systemNotifications') || data.systemNotifications is bool)
+        && (!hasField(data, 'pushEnabled') || data.pushEnabled is bool)
+        && (!hasField(data, 'sounds') || data.sounds is bool)
+        && (!hasField(data, 'messagePreviews') || data.messagePreviews is bool)
+        && (!hasField(data, 'quietHours') || isValidQuietHours(data.quietHours));
+    }
+
     function isValidAttachment(att) {
       return att == null || (
         att.key is string
@@ -49,6 +86,12 @@ service cloud.firestore {
         && (!hasField(att, 'size') || (att.size is int && att.size >= 0 && att.size <= 52428800))
         && (!hasField(att, 'fileSize') || (att.fileSize is int && att.fileSize >= 0 && att.fileSize <= 52428800))
       );
+    }
+
+    function isValidMentions(data, senderUid) {
+      return data is list
+        && data.size() <= 10
+        && !data.hasAny([senderUid]);
     }
 
     // Conversation documents are created only for direct chats. Their message
@@ -110,6 +153,7 @@ service cloud.firestore {
         && request.resource.data.sender.uid == request.auth.uid
         && (!hasField(request.resource.data, 'text') || isValidText(request.resource.data.text))
         && (!hasField(request.resource.data, 'attachment') || isValidAttachment(request.resource.data.attachment))
+        && (!hasField(request.resource.data, 'mentions') || isValidMentions(request.resource.data.mentions, request.auth.uid))
         && (
           (hasField(request.resource.data, 'text')
             && request.resource.data.text is string
@@ -159,6 +203,58 @@ service cloud.firestore {
       allow delete: if isOwner(uid) && isDirectRoomMember(conversationId);
     }
 
+    // Notification records are created only by trusted Cloud Functions.
+    // Clients can read their own inbox, mark records read, and remove records.
+    match /user_private/{uid}/notifications/{notificationId} {
+      allow get, list: if isOwner(uid);
+      allow create: if false;
+      allow update: if isOwner(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead', 'readAt'])
+        && request.resource.data.isRead == true
+        && request.resource.data.readAt is timestamp
+        && request.resource.data.readAt == request.time;
+      allow delete: if isOwner(uid);
+    }
+
+    match /user_private/{uid}/notification_settings/{settingsId} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && settingsId == 'preferences'
+        && isValidNotificationSettings(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /user_private/{uid}/muted_rooms/{roomId} {
+      allow read: if isOwner(uid);
+      allow create, update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly(['muted', 'updatedAt'])
+        && request.resource.data.muted == true
+        && request.resource.data.updatedAt is timestamp
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isOwner(uid);
+    }
+
+    // Push endpoints contain device-specific credentials and are callable-only.
+    match /user_private/{uid}/push_subscriptions/{subscriptionId} {
+      allow read, write: if false;
+    }
+
+    match /user_private/{uid}/notification_events/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /user_private/{uid}/security_sessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /user_private/{uid}/call_notification_events/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /user_private/{uid}/call_rate_limits/{rateId} {
+      allow read, write: if false;
+    }
+
     // Minimal profiles power the searchable New Chat picker. Email addresses
     // are intentionally excluded from this public-to-members directory.
     match /user_profiles/{uid} {
@@ -202,9 +298,32 @@ service cloud.firestore {
       allow read: if isAuthenticated()
         && (resource.data.caller.uid == request.auth.uid || resource.data.recipient.uid == request.auth.uid);
       allow create: if isAuthenticated()
-        && request.resource.data.caller.uid == request.auth.uid;
+        && request.resource.data.keys().hasOnly([
+          'id', 'conversationId', 'caller', 'recipient', 'callType', 'status',
+          'meetingId', 'createdAt', 'answeredAt', 'endedAt', 'endedReason'
+        ])
+        && request.resource.data.id == callId
+        && request.resource.data.caller is map
+        && request.resource.data.caller.uid == request.auth.uid
+        && request.resource.data.recipient is map
+        && request.resource.data.recipient.uid is string
+        && request.resource.data.recipient.uid != request.auth.uid
+        && request.resource.data.callType in ['voice', 'video']
+        && request.resource.data.status in ['ringing', 'initiating']
+        && request.resource.data.createdAt is int;
       allow update: if isAuthenticated()
-        && (resource.data.caller.uid == request.auth.uid || resource.data.recipient.uid == request.auth.uid);
+        && (resource.data.caller.uid == request.auth.uid || resource.data.recipient.uid == request.auth.uid)
+        && request.resource.data.caller == resource.data.caller
+        && request.resource.data.recipient == resource.data.recipient
+        && request.resource.data.id == resource.data.id
+        && request.resource.data.callType == resource.data.callType
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status', 'meetingId', 'answeredAt', 'endedAt', 'endedReason'
+        ])
+        && request.resource.data.status in [
+          'ringing', 'initiating', 'accepted', 'rejected', 'busy', 'missed', 'ended', 'failed'
+        ];
       allow delete: if isAuthenticated()
         && (resource.data.caller.uid == request.auth.uid || resource.data.recipient.uid == request.auth.uid);
     }

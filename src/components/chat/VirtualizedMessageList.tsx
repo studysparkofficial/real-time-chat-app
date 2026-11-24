@@ -8,6 +8,8 @@ interface VirtualizedMessageListProps {
   messages: ChatMessage[];
   currentUser: ChatUser | null;
   initialLoading: boolean;
+  jumpToMessageId?: string | null;
+  onJumpMessageComplete?: () => void;
   onRetry: (clientTempId: string) => void;
   onReply: (message: ChatMessage) => void;
   onReaction: (messageId: string, emoji: string) => void;
@@ -20,6 +22,8 @@ export const VirtualizedMessageList: React.FC<VirtualizedMessageListProps> = ({
   messages,
   currentUser,
   initialLoading,
+  jumpToMessageId,
+  onJumpMessageComplete,
   onRetry,
   onReply,
   onReaction,
@@ -56,6 +60,23 @@ export const VirtualizedMessageList: React.FC<VirtualizedMessageListProps> = ({
       rowVirtualizerRef.current.scrollToIndex(messages.length - 1, { align: 'end' });
     }
   }, [messages.length]);
+
+  useEffect(() => {
+    if (!jumpToMessageId || initialLoading) return;
+    const targetIndex = messagesRef.current.findIndex((message) => message.id === jumpToMessageId);
+    if (targetIndex < 0) return;
+    rowVirtualizerRef.current.scrollToIndex(targetIndex, { align: 'center', behavior: 'smooth' });
+    const timer = window.setTimeout(() => {
+      const element = document.getElementById(`msg-${jumpToMessageId}`);
+      if (element) {
+        element.style.transition = 'background-color 0.4s ease';
+        element.style.backgroundColor = 'rgba(59, 130, 246, 0.18)';
+        window.setTimeout(() => { element.style.backgroundColor = 'transparent'; }, 1300);
+      }
+      onJumpMessageComplete?.();
+    }, 120);
+    return () => window.clearTimeout(timer);
+  }, [jumpToMessageId, initialLoading, messages.length, onJumpMessageComplete]);
 
   useEffect(() => {
     const element = parentRef.current;

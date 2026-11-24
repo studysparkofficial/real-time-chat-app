@@ -1,7 +1,26 @@
-import { auth } from './firebase';
+import { auth, functions, httpsCallable } from './firebase';
 import { MessageAttachment } from '../types/chat.types';
 
-export const API_BASE_URL = 'https://0sz03xhubg.execute-api.ap-southeast-2.amazonaws.com/prod';
+const configuredMediaApi = (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_MEDIA_API_URL?.trim();
+const isLocalhost = typeof window !== 'undefined'
+  && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+
+export const API_BASE_URL = configuredMediaApi
+  ? configuredMediaApi.replace(/\/+$/, '')
+  : (isLocalhost
+    ? `http://${window.location.hostname || 'localhost'}:${Number(window.location.port) || 3001}/api/media`
+    : 'https://0sz03xhubg.execute-api.ap-southeast-2.amazonaws.com/prod');
+
+export async function ensureAuthReady(): Promise<void> {
+  if (auth.currentUser) return;
+  if (typeof (auth as unknown as { authStateReady?: () => Promise<void> }).authStateReady === 'function') {
+    try {
+      await (auth as unknown as { authStateReady: () => Promise<void> }).authStateReady();
+    } catch {
+      // ignore
+    }
+  }
+}
 export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
 
 export const ALLOWED_MIME_TYPES: Record<string, { ext: string; label: string; category: MessageAttachment['category'] }> = {
@@ -91,7 +110,21 @@ export function extractKeyFromS3Url(url?: string): string {
   try {
     if (url.includes('.amazonaws.com/')) {
       const part = url.split('.amazonaws.com/')[1];
-      return decodeURIComponent(part.split('?')[0]);
+      const cleanPart = decodeURIComponent(part.split('?')[0]);
+      // If path-style URL (e.g. s3.amazonaws.com/bucket-name/key), strip leading bucket segment
+      try {
+        const urlObj = new URL(url);
+        if (urlObj.hostname.startsWith('s3.') || urlObj.hostname === 's3.amazonaws.com') {
+          const segments = cleanPart.split('/');
+          if (segments.length > 1) {
+            segments.shift();
+            return segments.join('/');
+          }
+        }
+      } catch {
+        // ignore
+      }
+      return cleanPart;
     }
     if (url.startsWith('http')) {
       const urlObj = new URL(url);
@@ -118,15 +151,16 @@ export function isUrlPresignedAndValid(url?: string): boolean {
   if (url.includes('x-id=PutObject')) return false;
 
   // Unsigned S3 URLs to private bucket will return AccessDenied if opened directly
-  if (url.includes('.amazonaws.com/') && !url.includes('X-Amz-Signature') && !url.includes('Signature=')) {
+  const lowerUrl = url.toLowerCase();
+  if (url.includes('.amazonaws.com/') && !lowerUrl.includes('x-amz-signature') && !lowerUrl.includes('signature=')) {
     return false;
   }
 
-  // Check AWS presigned expiry
+  // Check AWS presigned expiry (supports both case-sensitive and case-insensitive query parameters)
   try {
     const urlObj = new URL(url);
-    const dateParam = urlObj.searchParams.get('X-Amz-Date');
-    const expiresParam = urlObj.searchParams.get('X-Amz-Expires');
+    const dateParam = urlObj.searchParams.get('X-Amz-Date') || urlObj.searchParams.get('x-amz-date');
+    const expiresParam = urlObj.searchParams.get('X-Amz-Expires') || urlObj.searchParams.get('x-amz-expires');
     if (dateParam && expiresParam) {
       // Date format: YYYYMMDDTHHMMSSZ (e.g. 20261121T094456Z)
       const year = parseInt(dateParam.slice(0, 4), 10);
@@ -295,6 +329,8 @@ export async function getPresignedDownloadUrl(
   }
   downloadUrlCache.delete(cleanKey);
 
+  // Ensure Firebase Auth has finished resolving initial state
+  await ensureAuthReady();
   const user = auth.currentUser;
   let idToken = '';
   if (user) {
@@ -323,23 +359,27 @@ export async function getPresignedDownloadUrl(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (idToken) headers.Authorization = `Bearer ${idToken}`;
 
-  // /download-url is the dedicated route. /upload-url dispatches on action=download
-  // when the dedicated route is not deployed.
-  for (const path of ['/download-url', '/upload-url']) {
+  // Candidate routes: configured API_BASE_URL, dedicated /download-url, /upload-url, and local /api/media proxy
+  const candidateEndpoints = Array.from(new Set([
+    `${API_BASE_URL}/download-url`,
+    `${API_BASE_URL}/upload-url`,
+    '/api/media/download-url',
+    '/api/media/upload-url'
+  ]));
+
+  for (const endpoint of candidateEndpoints) {
     try {
-      const res = await fetch(`${API_BASE_URL}${path}`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers,
         body: JSON.stringify(payload)
       });
       if (!res.ok) {
-        console.warn(`[DownloadUrl] ${path} returned HTTP ${res.status}.`);
         continue;
       }
       const data = await readApiPayload(res);
       const downloadUrl = pickGetObjectUrl(data);
       if (!downloadUrl) {
-        console.warn(`[DownloadUrl] ${path} did not return a valid GetObject URL.`);
         continue;
       }
       const expiresInSec = typeof data.expiresIn === 'number' ? data.expiresIn : 900;
@@ -348,9 +388,29 @@ export async function getPresignedDownloadUrl(
         expiresAt: Date.now() + expiresInSec * 1000
       });
       return downloadUrl;
-    } catch (err) {
-      console.warn(`[DownloadUrl] ${path} failed:`, err);
+    } catch {
+      // try next candidate endpoint
     }
+  }
+
+  // Cloud Function fallback: handles CORS and authenticated token exchange directly
+  try {
+    const getMediaFn = httpsCallable<typeof payload, { downloadUrl?: string; expiresIn?: number }>(
+      functions,
+      'getMediaDownloadUrl'
+    );
+    const result = await getMediaFn(payload);
+    if (result?.data?.downloadUrl && isOpenableS3Url(result.data.downloadUrl)) {
+      const downloadUrl = result.data.downloadUrl;
+      const expiresInSec = typeof result.data.expiresIn === 'number' ? result.data.expiresIn : 900;
+      downloadUrlCache.set(cleanKey, {
+        url: downloadUrl,
+        expiresAt: Date.now() + expiresInSec * 1000
+      });
+      return downloadUrl;
+    }
+  } catch (fnErr) {
+    console.warn('[DownloadUrl] Cloud Function fallback attempt:', fnErr);
   }
 
   return '';
@@ -369,6 +429,7 @@ export async function uploadToS3(
     throw new Error(validation.error || 'Invalid file format');
   }
 
+  await ensureAuthReady();
   const user = auth.currentUser;
   if (!user) {
     throw new Error('Your sign-in session is not ready. Please sign in again before uploading.');
@@ -380,23 +441,60 @@ export async function uploadToS3(
     throw new Error('Could not refresh your sign-in session. Please sign in again before uploading.');
   }
 
-  // Request a presigned upload URL from API Gateway.
+  // Request a presigned upload URL from candidate endpoints
   try {
-    const initRes = await fetch(`${API_BASE_URL}/upload-url`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
-      },
-      body: JSON.stringify({
-        fileName: file.name,
-        contentType: validation.mimeType,
-        size: file.size
-      })
-    });
+    const uploadEndpoints = Array.from(new Set([
+      `${API_BASE_URL}/upload-url`,
+      '/api/media/upload-url'
+    ]));
 
-    const initData = await readApiPayload(initRes);
-    if (initRes.ok) {
+    let initRes: Response | null = null;
+    let initData: Record<string, unknown> = {};
+
+    const uploadPayload = {
+      fileName: file.name,
+      contentType: validation.mimeType,
+      size: file.size
+    };
+
+    for (const endpoint of uploadEndpoints) {
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(idToken ? { 'Authorization': `Bearer ${idToken}` } : {})
+          },
+          body: JSON.stringify(uploadPayload)
+        });
+        if (res.ok) {
+          initRes = res;
+          initData = await readApiPayload(res);
+          break;
+        }
+      } catch {
+        // try next endpoint
+      }
+    }
+
+    // Cloud Function fallback for upload URL
+    if (!initRes || !initRes.ok) {
+      try {
+        const getUploadFn = httpsCallable<typeof uploadPayload, Record<string, unknown>>(
+          functions,
+          'getMediaUploadUrl'
+        );
+        const fnRes = await getUploadFn(uploadPayload);
+        if (fnRes?.data && typeof fnRes.data === 'object') {
+          initData = unwrapApiPayload(fnRes.data);
+          initRes = { ok: true, status: 200 } as unknown as Response;
+        }
+      } catch (fnErr) {
+        console.warn('[UploadToS3] Cloud Function upload authorization fallback attempt:', fnErr);
+      }
+    }
+
+    if (initRes && initRes.ok) {
       const rawPost = initData.post || initData.presignedPost;
       const postData = rawPost && typeof rawPost === 'object'
         ? rawPost as Record<string, unknown>
@@ -504,7 +602,7 @@ export async function uploadToS3(
       };
     }
 
-    throw new Error(responseErrorMessage(initData, initRes.status));
+    throw new Error(responseErrorMessage(initData, initRes ? initRes.status : 500));
   } catch (s3Err) {
     console.error('[S3] Upload failed:', s3Err);
     if (s3Err instanceof TypeError) {

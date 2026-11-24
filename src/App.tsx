@@ -12,6 +12,7 @@ import { IncomingCallModal } from './components/calling/IncomingCallModal';
 import { OutgoingCallModal } from './components/calling/OutgoingCallModal';
 import { CallWindow } from './components/calling/CallWindow';
 import { CallHistoryModal } from './components/calling/CallHistoryModal';
+import { NotificationCenter } from './components/notifications/NotificationCenter';
 
 import { useAuth } from './hooks/useAuth';
 import { usePresence } from './hooks/usePresence';
@@ -22,11 +23,13 @@ import { useHaptics } from './hooks/useHaptics';
 import { usePwaInstall } from './hooks/usePwaInstall';
 import { useDirectMessages } from './hooks/useDirectMessages';
 import { useCalling } from './hooks/useCalling';
+import { useNotifications } from './hooks/useNotifications';
 
 import { db, collection, addDoc, onSnapshot } from './services/firebase';
 import { localCache } from './services/indexedDbCache';
 import { validateAttachment } from './services/s3Service';
-import { ChatRoom, ChatUser, DirectConversation, MessageAttachment, MessageReplyReference } from './types/chat.types';
+import { AppNotification, ChatRoom, ChatUser, DirectConversation, MessageAttachment, MessageReplyReference } from './types/chat.types';
+import { isDirectConversationId } from './services/directMessages';
 
 // Official JNU Campus Channels
 const JNU_DEFAULT_ROOMS: ChatRoom[] = [
@@ -114,8 +117,10 @@ export const App: React.FC = () => {
     updatePreferences
   } = useAuth();
 
+  const notificationState = useNotifications(currentUser);
+
   // 2. Audio & Haptics
-  const { playSent, playReceived, playReaction } = useAudio(preferences.soundEnabled);
+  const { playSent, playReceived, playReaction } = useAudio(preferences.soundEnabled && notificationState.settings.sounds);
   const { lightTap } = useHaptics(preferences.hapticsEnabled);
 
   // 3. Channels State
@@ -124,6 +129,8 @@ export const App: React.FC = () => {
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [activeDirectConversationId, setActiveDirectConversationId] = useState<string | null>(null);
   const [activeDirectPeer, setActiveDirectPeer] = useState<ChatUser | null>(null);
+  const [pendingNotificationRoute, setPendingNotificationRoute] = useState<{ roomId?: string; messageId?: string; callId?: string } | null>(null);
+  const [notificationMessageId, setNotificationMessageId] = useState<string | null>(null);
 
   // 4. Modals and Overlays State
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -148,10 +155,20 @@ export const App: React.FC = () => {
     const root = document.documentElement;
     const visualViewport = window.visualViewport;
     const updateViewportHeight = () => {
-      const height = visualViewport ? visualViewport.height : window.innerHeight;
+      let height = window.innerHeight;
+      if (visualViewport) {
+        // When Android soft keyboard opens, visualViewport.scale may become > 1 if auto-zoomed.
+        // Multiplying by scale restores the unscaled physical layout height and cancels distortion.
+        height = visualViewport.scale > 1.01
+          ? visualViewport.height * visualViewport.scale
+          : visualViewport.height;
+      }
       root.style.setProperty('--app-viewport-height', `${Math.round(height)}px`);
       if (window.scrollY !== 0 || window.scrollX !== 0) {
         window.scrollTo(0, 0);
+      }
+      if (document.body.scrollTop !== 0) {
+        document.body.scrollTop = 0;
       }
     };
 
@@ -160,11 +177,21 @@ export const App: React.FC = () => {
     visualViewport?.addEventListener('scroll', updateViewportHeight);
     window.addEventListener('resize', updateViewportHeight);
     window.addEventListener('orientationchange', updateViewportHeight);
+
+    // Prevent multi-touch pinch to zoom from scaling the chat layout
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches && e.touches.length > 1) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+
     return () => {
       visualViewport?.removeEventListener('resize', updateViewportHeight);
       visualViewport?.removeEventListener('scroll', updateViewportHeight);
       window.removeEventListener('resize', updateViewportHeight);
       window.removeEventListener('orientationchange', updateViewportHeight);
+      document.removeEventListener('touchmove', handleTouchMove);
       root.style.removeProperty('--app-viewport-height');
     };
   }, []);
@@ -356,6 +383,72 @@ export const App: React.FC = () => {
 
   const activeMessageRoomId = activeDirectConversationId || activeRoom.id;
 
+  const handleOpenNotification = useCallback((notification: AppNotification) => {
+    if (notification.roomId) {
+      if (isDirectConversationId(notification.roomId)) {
+        const conversation = directConversations.find((item) => item.id === notification.roomId);
+        if (!conversation) {
+          setPendingNotificationRoute({ roomId: notification.roomId, messageId: notification.messageId });
+          return;
+        }
+        handleSelectDirectConversation(conversation);
+      } else {
+        if (!rooms.some((room) => room.id === notification.roomId)) {
+          setPendingNotificationRoute({ roomId: notification.roomId, messageId: notification.messageId });
+          return;
+        }
+        handleSelectRoom(notification.roomId);
+      }
+      setNotificationMessageId(notification.messageId || null);
+      return;
+    }
+    if (notification.callId) setCallHistoryModalOpen(true);
+  }, [directConversations, rooms, handleSelectDirectConversation, handleSelectRoom]);
+
+  const onNotificationJumpComplete = useCallback(() => setNotificationMessageId(null), []);
+
+  useEffect(() => {
+    const readRoute = (urlValue: string) => {
+      try {
+        const url = new URL(urlValue, window.location.origin);
+        const roomId = url.searchParams.get('notificationRoom') || undefined;
+        const messageId = url.searchParams.get('notificationMessage') || undefined;
+        const callId = url.searchParams.get('notificationCall') || undefined;
+        if (roomId || callId) setPendingNotificationRoute({ roomId, messageId, callId });
+      } catch {
+        // Ignore malformed notification links.
+      }
+    };
+
+    readRoute(window.location.href);
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'pulsechat-notification-click' && typeof event.data.url === 'string') {
+        readRoute(event.data.url);
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', handleServiceWorkerMessage);
+    return () => navigator.serviceWorker?.removeEventListener('message', handleServiceWorkerMessage);
+  }, []);
+
+  useEffect(() => {
+    if (!currentUser || !pendingNotificationRoute) return;
+    const target = pendingNotificationRoute;
+    if (target.roomId) {
+      if (isDirectConversationId(target.roomId)) {
+        const conversation = directConversations.find((item) => item.id === target.roomId);
+        if (!conversation) return;
+        handleSelectDirectConversation(conversation);
+      } else {
+        if (!rooms.some((room) => room.id === target.roomId)) return;
+        handleSelectRoom(target.roomId);
+      }
+      setNotificationMessageId(target.messageId || null);
+    }
+    if (target.callId) setCallHistoryModalOpen(true);
+    window.history.replaceState(window.history.state, '', window.location.pathname);
+    setPendingNotificationRoute(null);
+  }, [currentUser?.uid, pendingNotificationRoute, directConversations, rooms, handleSelectDirectConversation, handleSelectRoom]);
+
   // 8. Messages Hook (Virtualization, Optimistic delivery, Offline IDB cache, Outbox queue)
   const {
     messages,
@@ -443,7 +536,7 @@ export const App: React.FC = () => {
   // cleared before the transfer starts, so the user can keep chatting or attach
   // another file while this upload runs.
   const handleSendMessage = useCallback(
-    async (text: string, file?: File | null) => {
+    async (text: string, file?: File | null, mentions: string[] = []) => {
       if (!currentUser) {
         setAuthModalOpen(true);
         return;
@@ -473,7 +566,7 @@ export const App: React.FC = () => {
           uploadState: 'uploading',
           uploadProgress: 0
         };
-        const clientTempId = beginAttachmentUpload(text, pendingAttachment, replyTo);
+        const clientTempId = beginAttachmentUpload(text, pendingAttachment, replyTo, mentions);
         if (!clientTempId) {
           if (pendingAttachment.previewUrl?.startsWith('blob:')) {
             URL.revokeObjectURL(pendingAttachment.previewUrl);
@@ -487,7 +580,7 @@ export const App: React.FC = () => {
         return;
       }
 
-      await sendMessage(text, null, replyTo);
+      await sendMessage(text, null, replyTo, mentions);
       clearStagedFile();
     },
     [
@@ -562,6 +655,31 @@ export const App: React.FC = () => {
     lightboxUrl ||
     isSidebarOpenMobile
   );
+
+  const notificationCenter = currentUser ? (
+    <NotificationCenter
+      currentUser={currentUser}
+      activeRoomId={activeMessageRoomId}
+      notifications={notificationState.notifications}
+      unreadCount={notificationState.unreadCount}
+      hasMore={notificationState.hasMore}
+      loadingMore={notificationState.loadingMore}
+      settings={notificationState.settings}
+      mutedRoomIds={notificationState.mutedRoomIds}
+      pushReady={notificationState.pushReady}
+      pushBusy={notificationState.pushBusy}
+      pushError={notificationState.pushError}
+      onMarkRead={notificationState.markAsRead}
+      onMarkAllRead={notificationState.markAllAsRead}
+      onLoadMore={notificationState.loadMore}
+      onDelete={notificationState.deleteNotification}
+      onUpdateSettings={notificationState.updateSettings}
+      onToggleMute={notificationState.toggleRoomMute}
+      onEnablePush={notificationState.enableBrowserNotifications}
+      onDisablePush={notificationState.disableBrowserNotifications}
+      onOpenNotification={handleOpenNotification}
+    />
+  ) : null;
 
   useEffect(() => {
     if (hasActiveOverlay) {
@@ -670,6 +788,10 @@ export const App: React.FC = () => {
         onStartVoiceCall={handleStartVoiceCall}
         onStartVideoCall={handleStartVideoCall}
         onOpenCallHistory={() => setCallHistoryModalOpen(true)}
+        notificationCenter={notificationCenter}
+        mentionUsers={onlineMembers.filter((member) => member.uid !== currentUser?.uid)}
+        jumpToMessageId={notificationMessageId}
+        onJumpMessageComplete={onNotificationJumpComplete}
       />
 
       {/* Modals & Overlays */}

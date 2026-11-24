@@ -55,6 +55,7 @@ export interface MessageReplyReference {
   id: string;
   text: string;
   senderName: string;
+  senderUid?: string;
 }
 
 export interface ChatMessage {
@@ -73,6 +74,7 @@ export interface ChatMessage {
   isRead?: boolean;
   attachment?: MessageAttachment | null;
   reactions?: Record<string, string[]>; // emoji -> array of uids
+  mentions?: string[];
   replyTo?: MessageReplyReference | null;
   clientTempId?: string;
   isOptimistic?: boolean;
@@ -100,6 +102,51 @@ export interface UserPreferences {
   theme: 'dark' | 'light';
   soundEnabled: boolean;
   hapticsEnabled: boolean;
+}
+
+export type NotificationCategory = 'messages' | 'calls' | 'groups' | 'security' | 'system';
+
+export type NotificationType =
+  | 'message' | 'reply' | 'mention' | 'reaction'
+  | 'group_announcement' | 'group_membership'
+  | 'incoming_call' | 'missed_call' | 'call_status'
+  | 'status_mention' | 'status_reply' | 'status_reaction'
+  | 'security' | 'system';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  category: NotificationCategory;
+  title: string;
+  body: string;
+  senderUid?: string;
+  senderName?: string;
+  roomId?: string;
+  messageId?: string;
+  callId?: string;
+  entityId?: string;
+  count: number;
+  isRead: boolean;
+  createdAt: number;
+}
+
+export interface NotificationSettings {
+  personalMessages: boolean;
+  groupMessages: boolean;
+  mentions: boolean;
+  replies: boolean;
+  reactions: boolean;
+  voiceCalls: boolean;
+  videoCalls: boolean;
+  missedCalls: boolean;
+  groupAnnouncements: boolean;
+  statusNotifications: boolean;
+  securityNotifications: boolean;
+  systemNotifications: boolean;
+  pushEnabled: boolean;
+  sounds: boolean;
+  messagePreviews: boolean;
+  quietHours: { enabled: boolean; start: string; end: string; timeZone: string };
 }
 
 export type CallType = 'voice' | 'video';

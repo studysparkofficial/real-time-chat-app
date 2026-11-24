@@ -1,6 +1,8 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
+import { connectFunctionsEmulator, getFunctions, httpsCallable } from 'firebase/functions';
 import {
   getAuth,
+  connectAuthEmulator,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithRedirect,
@@ -16,6 +18,7 @@ import {
 import {
   initializeFirestore,
   getFirestore,
+  connectFirestoreEmulator,
   persistentLocalCache,
   persistentMultipleTabManager,
   collection,
@@ -30,6 +33,7 @@ import {
   limit,
   where,
   startAt,
+  startAfter,
   endAt,
   getDocs,
   runTransaction,
@@ -68,6 +72,19 @@ try {
 }
 
 export const db = firestoreInstance;
+export const functions = getFunctions(
+  app,
+  (import.meta as unknown as { env?: Record<string, string> }).env?.VITE_FIREBASE_FUNCTIONS_REGION || 'us-central1'
+);
+export { httpsCallable };
+
+const env = (import.meta as unknown as { env?: Record<string, string> }).env;
+if (typeof window !== 'undefined' && env?.VITE_USE_FIREBASE_EMULATORS === 'true') {
+  const emulatorHost = env.VITE_FIREBASE_EMULATOR_HOST || '127.0.0.1';
+  connectAuthEmulator(auth, `http://${emulatorHost}:9099`, { disableWarnings: true });
+  connectFirestoreEmulator(db, emulatorHost, 8080);
+  connectFunctionsEmulator(functions, emulatorHost, 5001);
+}
 
 // Helper: Check if user is on mobile
 export function isMobileDevice(): boolean {
@@ -152,6 +169,7 @@ export {
   limit,
   where,
   startAt,
+  startAfter,
   endAt,
   getDocs,
   runTransaction,

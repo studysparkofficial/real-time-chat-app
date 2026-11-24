@@ -35,7 +35,7 @@ interface AppLayoutProps {
   messages: ChatMessage[];
   initialLoading: boolean;
   typingUsers: { uid: string; displayName: string; timestamp: number }[];
-  onSendMessage: (text: string, file?: File | null) => Promise<void>;
+  onSendMessage: (text: string, file?: File | null, mentions?: string[]) => Promise<void>;
   onTyping: () => void;
   replyTo: MessageReplyReference | null;
   onSetReplyTo: (ref: MessageReplyReference | null) => void;
@@ -71,6 +71,10 @@ interface AppLayoutProps {
   onStartVoiceCall?: (peer: ChatUser) => void;
   onStartVideoCall?: (peer: ChatUser) => void;
   onOpenCallHistory?: () => void;
+  notificationCenter: React.ReactNode;
+  mentionUsers: ChatUser[];
+  jumpToMessageId?: string | null;
+  onJumpMessageComplete?: () => void;
 }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({
@@ -126,7 +130,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onInstallApp,
   onStartVoiceCall,
   onStartVideoCall,
-  onOpenCallHistory
+  onOpenCallHistory,
+  notificationCenter,
+  mentionUsers,
+  jumpToMessageId,
+  onJumpMessageComplete
 }) => {
   const handleToggleSidebar = () => {
     if (typeof window !== 'undefined' && window.innerWidth <= 768) {
@@ -194,6 +202,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           onStartVoiceCall={onStartVoiceCall}
           onStartVideoCall={onStartVideoCall}
           onOpenCallHistory={onOpenCallHistory}
+          notificationCenter={notificationCenter}
         />
 
         {canInstallApp && (
@@ -220,12 +229,15 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             messages={messages}
             currentUser={currentUser}
             initialLoading={initialLoading}
+            jumpToMessageId={jumpToMessageId}
+            onJumpMessageComplete={onJumpMessageComplete}
             onRetry={onRetryMessage}
             onReply={(msg) =>
               onSetReplyTo({
                 id: msg.id,
                 text: msg.text || (msg.attachment ? `[${msg.attachment.category}]` : ''),
-                senderName: msg.sender.displayName
+                senderName: msg.sender.displayName,
+                senderUid: msg.sender.uid
               })
             }
             onReaction={onReaction}
@@ -241,10 +253,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         {/* WhatsApp-Style Pill Input Bar */}
         <ChatInputBar
           key={activeDirectConversationId || activeRoom.id}
-          onSendMessage={async (txt, file) => {
-            await onSendMessage(txt, file);
+          onSendMessage={async (txt, file, mentions) => {
+            await onSendMessage(txt, file, mentions);
             onSetReplyTo(null);
           }}
+          mentionUsers={mentionUsers}
           onTyping={onTyping}
           replyTo={replyTo}
           placeholder={activeDirectUser ? `Message ${activeDirectUser.displayName}…` : 'Message #JNUverse… (paste photos or press Enter)'}

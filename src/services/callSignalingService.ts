@@ -203,9 +203,10 @@ class CallSignalingService {
   ): Promise<void> {
     try {
       const callRef = doc(db, 'calls', callId);
+      const { recipient: socketRecipient, ...persistedExtra } = extra;
       const updates: Record<string, any> = {
         status,
-        ...extra
+        ...persistedExtra
       };
 
       if (status === 'accepted') {
@@ -217,8 +218,8 @@ class CallSignalingService {
       await updateDoc(callRef, updates);
 
       // Notify via Socket.IO if peer UID is provided in extra
-      if (this.socket?.connected && extra.recipient?.uid) {
-        const toUid = extra.recipient.uid;
+      if (this.socket?.connected && socketRecipient?.uid) {
+        const toUid = socketRecipient.uid;
         if (status === 'ringing') this.socket.emit('call:ringing', { toUid, callId });
         if (status === 'accepted') this.socket.emit('call:accept', { toUid, callId });
         if (status === 'rejected') this.socket.emit('call:reject', { toUid, callId, reason: extra.endedReason });

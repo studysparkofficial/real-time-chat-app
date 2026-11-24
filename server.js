@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import cors from 'cors';
 import { Server } from 'socket.io';
 import { createCallRouter } from './backend/callRoutes.js';
+import { createMediaRouter } from './backend/mediaRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,12 @@ const io = new Server(server, {
 
 // Mount Chime SDK calling API router
 app.use('/api/calls', createCallRouter());
+
+// Mount AWS S3 media upload/download router with full CORS support
+const mediaRouter = createMediaRouter();
+app.use('/api/media', mediaRouter);
+app.use('/upload-url', mediaRouter);
+app.use('/download-url', mediaRouter);
 
 const DEFAULT_PORT = 3001;
 const PORT = Number(process.env.PORT) || DEFAULT_PORT;

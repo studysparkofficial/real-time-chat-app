@@ -165,13 +165,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       return;
     }
 
-    // Wait until Firestore confirms delivery before asking the API for a
-    // message-scoped download URL. The upload may finish before the message exists.
-    if (message.status !== 'delivered') {
-      setMediaLoading(false);
-      return;
-    }
-
     setMediaLoading(true);
     getPresignedDownloadUrl(key, message.roomId, message.id, false, {
       fileName: att.fileName || att.name,
@@ -208,7 +201,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     message.attachment?.uploadState,
     message.roomId,
     message.id,
-    message.status
+    message.status,
+    currentUser?.uid
   ]);
 
   const handleMediaError = () => {
@@ -216,7 +210,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       message.attachment?.key ||
       extractKeyFromS3Url(message.attachment?.url) ||
       extractKeyFromS3Url(message.attachment?.downloadUrl);
-    if (!key || mediaUrl.startsWith('blob:') || mediaUrl.startsWith('data:') || message.status !== 'delivered') return;
+    if (!key || mediaUrl.startsWith('blob:') || mediaUrl.startsWith('data:') || message.attachment?.uploadState === 'uploading') return;
     getPresignedDownloadUrl(key, message.roomId, message.id, true, {
       fileName: message.attachment?.fileName || message.attachment?.name,
       mimeType: message.attachment?.mimeType || message.attachment?.type
@@ -235,34 +229,56 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     event?.preventDefault();
     event?.stopPropagation();
     if (message.attachment?.uploadState === 'uploading') return;
-    const popup = window.open('about:blank', '_blank');
-    if (popup) popup.opener = null;
+
     const key =
       message.attachment?.key ||
       extractKeyFromS3Url(mediaUrl) ||
-      extractKeyFromS3Url(message.attachment?.url);
+      extractKeyFromS3Url(message.attachment?.url) ||
+      extractKeyFromS3Url(message.attachment?.downloadUrl);
     const isLocalPreview = mediaUrl.startsWith('blob:') || mediaUrl.startsWith('data:');
     let url = isLocalPreview || isOpenableS3Url(mediaUrl) ? mediaUrl : '';
-    if (key && !isLocalPreview) {
-      const fresh = await getPresignedDownloadUrl(key, message.roomId, message.id, true, {
-        fileName: message.attachment?.fileName || message.attachment?.name,
-        mimeType: message.attachment?.mimeType || message.attachment?.type
-      });
-      if (fresh) {
-        url = fresh;
-        cacheSignedMediaUrl(mediaCacheKey, fresh);
+
+    if (key && !isLocalPreview && !isOpenableS3Url(url)) {
+      setMediaLoading(true);
+      try {
+        const fresh = await getPresignedDownloadUrl(key, message.roomId, message.id, true, {
+          fileName: message.attachment?.fileName || message.attachment?.name,
+          mimeType: message.attachment?.mimeType || message.attachment?.type
+        });
+        if (fresh) {
+          url = fresh;
+          cacheSignedMediaUrl(mediaCacheKey, fresh);
+        }
+      } catch (err) {
+        console.warn('[Attachment] Failed to fetch download URL on open:', err);
+      } finally {
+        setMediaLoading(false);
       }
     }
+
     if (!url) {
-      popup?.close();
       setMediaFailed(true);
       return;
     }
+
     updateMediaUrl(url);
-    if (popup) {
-      popup.location.href = url;
-    } else {
-      setMediaFailed(true);
+    setMediaFailed(false);
+
+    // Reliable cross-platform open/download (immune to mobile Chrome/Android popup blocker)
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      const downloadName = message.attachment?.fileName || message.attachment?.name;
+      if (downloadName) {
+        link.download = downloadName;
+      }
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      window.location.assign(url);
     }
   };
 
@@ -504,10 +520,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <button
                 type="button"
                 onClick={openStoredFile}
-                disabled={
-                  message.attachment.uploadState === 'uploading' ||
-                  (!mediaUrl && message.status !== 'delivered')
-                }
+                disabled={message.attachment.uploadState === 'uploading'}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -519,10 +532,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   textDecoration: 'none',
                   color: 'inherit',
                   border: 'none',
-                  cursor:
-                    message.attachment.uploadState === 'uploading' || (!mediaUrl && message.status !== 'delivered')
-                      ? 'wait'
-                      : 'pointer',
+                  cursor: message.attachment.uploadState === 'uploading' ? 'wait' : 'pointer',
                   textAlign: 'left'
                 }}
               >

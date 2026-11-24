@@ -7,6 +7,7 @@
     "dev": "vite",
     "server": "node server.js",
     "build": "tsc && vite build",
+    "test:notifications": "node --test functions/test/*.test.js",
     "preview": "vite preview"
   },
   "dependencies": {
