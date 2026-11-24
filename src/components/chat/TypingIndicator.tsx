@@ -20,6 +20,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({ typingUsers })
       style={{
         display: 'flex',
         alignItems: 'center',
+        flexShrink: 0,
         gap: '8px',
         padding: '4px 18px',
         fontSize: '12.5px',

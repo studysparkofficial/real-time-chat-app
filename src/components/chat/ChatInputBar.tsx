@@ -167,6 +167,8 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         flexDirection: 'column',
         position: 'relative',
         width: '100%',
+        minWidth: 0,
+        flexShrink: 0,
         zIndex: 25
       }}
     >
