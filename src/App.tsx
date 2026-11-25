@@ -134,6 +134,14 @@ export const App: React.FC = () => {
 
   // 4. Modals and Overlays State
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authPromptMessage, setAuthPromptMessage] = useState<string | null>(null);
+
+  const requireFullAuth = useCallback((reason?: string) => {
+    setAuthPromptMessage(
+      reason || 'Guest Pass is read-only. Sign in with Google to send messages, media, and interact.'
+    );
+    setAuthModalOpen(true);
+  }, []);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [channelInfoModalOpen, setChannelInfoModalOpen] = useState(false);
   const [createChannelModalOpen, setCreateChannelModalOpen] = useState(false);
@@ -252,16 +260,24 @@ export const App: React.FC = () => {
 
   const handleStartVoiceCall = useCallback(
     (peer: ChatUser) => {
+      if (!currentUser || currentUser.isAnonymous) {
+        requireFullAuth('Sign in with Google to start a voice call.');
+        return;
+      }
       void startCall(peer, 'voice');
     },
-    [startCall]
+    [currentUser, requireFullAuth, startCall]
   );
 
   const handleStartVideoCall = useCallback(
     (peer: ChatUser) => {
+      if (!currentUser || currentUser.isAnonymous) {
+        requireFullAuth('Sign in with Google to start a video call.');
+        return;
+      }
       void startCall(peer, 'video');
     },
-    [startCall]
+    [currentUser, requireFullAuth, startCall]
   );
 
   // Sync custom channels from Firestore & cache in IndexedDB.
@@ -537,8 +553,8 @@ export const App: React.FC = () => {
   // another file while this upload runs.
   const handleSendMessage = useCallback(
     async (text: string, file?: File | null, mentions: string[] = []) => {
-      if (!currentUser) {
-        setAuthModalOpen(true);
+      if (!currentUser || currentUser.isAnonymous) {
+        requireFullAuth('Guest Pass is read-only. Sign in with Google to send messages and media.');
         return;
       }
 
@@ -585,6 +601,7 @@ export const App: React.FC = () => {
     },
     [
       currentUser,
+      requireFullAuth,
       sendMessage,
       replyTo,
       clearStagedFile,
@@ -597,22 +614,22 @@ export const App: React.FC = () => {
   // Toggle Reaction with Haptic & Sound
   const handleToggleReaction = useCallback(
     (messageId: string, emoji: string) => {
-      if (!currentUser) {
-        setAuthModalOpen(true);
+      if (!currentUser || currentUser.isAnonymous) {
+        requireFullAuth('Sign in with Google to react to messages.');
         return;
       }
       playReaction();
       lightTap();
       toggleReaction(messageId, emoji);
     },
-    [currentUser, playReaction, lightTap, toggleReaction]
+    [currentUser, requireFullAuth, playReaction, lightTap, toggleReaction]
   );
 
   // Create Channel
   const handleCreateChannel = useCallback(
     async (channelData: { name: string; slug: string; icon: string; topic: string }) => {
-      if (!currentUser) {
-        setAuthModalOpen(true);
+      if (!currentUser || currentUser.isAnonymous) {
+        requireFullAuth('Sign in with Google to create channels.');
         return;
       }
 
@@ -735,8 +752,11 @@ export const App: React.FC = () => {
         onSelectRoom={handleSelectRoom}
         onSelectDirectConversation={handleSelectDirectConversation}
         onOpenNewDirectMessage={() => {
-          if (!currentUser) setAuthModalOpen(true);
-          else setNewDirectMessageModalOpen(true);
+          if (!currentUser || currentUser.isAnonymous) {
+            requireFullAuth('Sign in with Google to start direct messages.');
+          } else {
+            setNewDirectMessageModalOpen(true);
+          }
         }}
         currentUser={currentUser}
         preferences={preferences}
@@ -756,25 +776,56 @@ export const App: React.FC = () => {
         uploadError={uploadError}
         isRecording={isRecording}
         recordingSeconds={recordingSeconds}
-        onStageFile={stageFile}
+        onStageFile={(file) => {
+          if (!currentUser || currentUser.isAnonymous) {
+            requireFullAuth('Sign in with Google to upload media or files.');
+            return false;
+          }
+          return stageFile(file);
+        }}
         onClearStagedFile={clearStagedFile}
-        onClipboardPaste={handleClipboardPaste}
-        onStartRecording={startRecording}
+        onClipboardPaste={(e) => {
+          if (!currentUser || currentUser.isAnonymous) {
+            e.preventDefault();
+            requireFullAuth('Sign in with Google to paste and send media.');
+            return;
+          }
+          handleClipboardPaste(e);
+        }}
+        onStartRecording={() => {
+          if (!currentUser || currentUser.isAnonymous) {
+            requireFullAuth('Sign in with Google to record and send voice notes.');
+            return;
+          }
+          void startRecording();
+        }}
         onStopRecording={stopRecording}
         onCancelRecording={cancelRecording}
         onRetryMessage={handleRetryMessage}
         onReaction={handleToggleReaction}
-        onDeleteMessage={deleteMessage}
+        onDeleteMessage={(messageId) => {
+          if (!currentUser || currentUser.isAnonymous) {
+            requireFullAuth('Sign in with Google to manage messages.');
+            return;
+          }
+          void deleteMessage(messageId);
+        }}
         onImageClick={(url, name) => {
           setLightboxUrl(url);
           setLightboxName(name);
         }}
-        onOpenCreateChannel={() => setCreateChannelModalOpen(true)}
+        onOpenCreateChannel={() => {
+          if (!currentUser || currentUser.isAnonymous) {
+            requireFullAuth('Sign in with Google to create a new channel.');
+            return;
+          }
+          setCreateChannelModalOpen(true);
+        }}
         onOpenAccountModal={() => {
           if (!currentUser) setAuthModalOpen(true);
           else setAccountModalOpen(true);
         }}
-        onOpenAuthModal={() => setAuthModalOpen(true)}
+        onOpenAuthModal={() => requireFullAuth()}
         onOpenChannelInfo={() => setChannelInfoModalOpen(true)}
         isSidebarOpenMobile={isSidebarOpenMobile}
         setIsSidebarOpenMobile={setIsSidebarOpenMobile}
@@ -787,7 +838,13 @@ export const App: React.FC = () => {
         onInstallApp={promptInstall}
         onStartVoiceCall={handleStartVoiceCall}
         onStartVideoCall={handleStartVideoCall}
-        onOpenCallHistory={() => setCallHistoryModalOpen(true)}
+        onOpenCallHistory={() => {
+          if (!currentUser || currentUser.isAnonymous) {
+            requireFullAuth('Sign in with Google to view call history.');
+            return;
+          }
+          setCallHistoryModalOpen(true);
+        }}
         notificationCenter={notificationCenter}
         mentionUsers={onlineMembers.filter((member) => member.uid !== currentUser?.uid)}
         jumpToMessageId={notificationMessageId}
@@ -797,11 +854,16 @@ export const App: React.FC = () => {
       {/* Modals & Overlays */}
       <AuthModal
         isOpen={authModalOpen}
-        onClose={() => setAuthModalOpen(false)}
+        onClose={() => {
+          setAuthModalOpen(false);
+          setAuthPromptMessage(null);
+        }}
         onGoogleSignIn={loginWithGoogle}
         onEmailSignIn={loginWithEmail}
         onEmailSignUp={registerWithEmail}
         onGuestSignIn={loginAsGuest}
+        promptMessage={authPromptMessage}
+        isGuestSession={Boolean(currentUser?.isAnonymous)}
       />
 
       <AccountModal

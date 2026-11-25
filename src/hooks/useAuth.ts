@@ -60,6 +60,31 @@ function browserDeviceLabel(): string {
   return 'Browser';
 }
 
+const GUEST_SESSION_KEY = 'pulsechat_guest_session';
+
+function readGuestSession(): ChatUser | null {
+  try {
+    const raw = sessionStorage.getItem(GUEST_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ChatUser;
+    return parsed?.uid && parsed.isAnonymous ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeGuestSession(guest: ChatUser | null): void {
+  try {
+    if (guest) {
+      sessionStorage.setItem(GUEST_SESSION_KEY, JSON.stringify(guest));
+    } else {
+      sessionStorage.removeItem(GUEST_SESSION_KEY);
+    }
+  } catch {
+    // storage unavailable
+  }
+}
+
 export function useAuth() {
   const [user, setUser] = useState<ChatUser | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -92,37 +117,43 @@ export function useAuth() {
 
       unsubscribe = onAuthStateChanged(auth, (fbUser) => {
         if (fbUser) {
+          const isGuest = Boolean(fbUser.isAnonymous);
+          if (!isGuest) {
+            writeGuestSession(null);
+          }
           const chatUser: ChatUser = {
             uid: fbUser.uid,
-            displayName: fbUser.displayName || (fbUser.isAnonymous ? 'Guest Scholar' : 'JNU Scholar'),
+            displayName: fbUser.displayName || (isGuest ? 'Guest Scholar' : 'JNU Scholar'),
             email: fbUser.email,
             photoURL: fbUser.photoURL || '👤',
-            isAnonymous: fbUser.isAnonymous,
+            isAnonymous: isGuest,
             status: 'online',
-            bio: 'Scholar at JNUverse',
+            bio: isGuest ? 'Read-only Guest Pass' : 'Scholar at JNUverse',
             lastSeen: Date.now()
           };
           setUser(chatUser);
-          const recordSession = httpsCallable(functions, 'recordNewSession');
-          void recordSession({ deviceId: getBrowserDeviceId(), deviceLabel: browserDeviceLabel() })
-            .catch((error) => console.warn('[Security] Session notification could not be recorded:', error));
-          void setDoc(
-            doc(db, 'user_profiles', fbUser.uid),
-            {
-              uid: fbUser.uid,
-              displayName: chatUser.displayName,
-              displayNameLower: chatUser.displayName.toLocaleLowerCase(),
-              photoURL: chatUser.photoURL || '👤',
-              isAnonymous: Boolean(fbUser.isAnonymous),
-              status: 'online',
-              updatedAt: Date.now()
-            },
-            { merge: true }
-          ).catch((error) => {
-            console.warn('[Profiles] Profile sync failed:', error);
-          });
+          if (!isGuest) {
+            const recordSession = httpsCallable(functions, 'recordNewSession');
+            void recordSession({ deviceId: getBrowserDeviceId(), deviceLabel: browserDeviceLabel() })
+              .catch((error) => console.warn('[Security] Session notification could not be recorded:', error));
+            void setDoc(
+              doc(db, 'user_profiles', fbUser.uid),
+              {
+                uid: fbUser.uid,
+                displayName: chatUser.displayName,
+                displayNameLower: chatUser.displayName.toLocaleLowerCase(),
+                photoURL: chatUser.photoURL || '👤',
+                isAnonymous: false,
+                status: 'online',
+                updatedAt: Date.now()
+              },
+              { merge: true }
+            ).catch((error) => {
+              console.warn('[Profiles] Profile sync failed:', error);
+            });
+          }
         } else {
-          setUser(null);
+          setUser(readGuestSession());
         }
         setLoading(false);
       });
@@ -165,14 +196,30 @@ export function useAuth() {
   const loginAsGuest = useCallback(async (name?: string) => {
     setLoading(true);
     try {
-      await signInGuest(name);
+      const fbUser = await signInGuest(name);
+      if (!fbUser) {
+        const guestName = name?.trim() || `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+        const localGuest: ChatUser = {
+          uid: `guest_${Math.random().toString(36).slice(2, 10)}`,
+          displayName: guestName,
+          email: null,
+          photoURL: '👤',
+          isAnonymous: true,
+          status: 'online',
+          bio: 'Read-only Guest Pass',
+          lastSeen: Date.now()
+        };
+        writeGuestSession(localGuest);
+        setUser(localGuest);
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
   const logout = useCallback(async () => {
-    if (user) {
+    writeGuestSession(null);
+    if (user && !user.isAnonymous) {
       try {
         // Mark status offline in Firestore
         await setDoc(
@@ -184,13 +231,15 @@ export function useAuth() {
         // Ignore
       }
     }
-    await logOut();
+    if (auth.currentUser) {
+      await logOut();
+    }
     setUser(null);
   }, [user]);
 
   const updateUserProfile = useCallback(
     async (updates: { displayName?: string; photoURL?: string; bio?: string; status?: UserPresenceStatus }) => {
-      if (!auth.currentUser || !user) return;
+      if (!auth.currentUser || !user || user.isAnonymous) return;
 
       const fbUpdates: { displayName?: string; photoURL?: string } = {};
       if (updates.displayName !== undefined) fbUpdates.displayName = updates.displayName;

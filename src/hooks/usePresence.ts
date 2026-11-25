@@ -39,9 +39,9 @@ export function usePresence(currentUser: ChatUser | null, activeRoomId: string) 
     };
   }, []);
 
-  // Presence Heartbeat throttled to 60s
+  // Presence Heartbeat throttled to 60s (disabled for read-only guests)
   useEffect(() => {
-    if (!currentUser) return;
+    if (!currentUser || currentUser.isAnonymous) return;
 
     const userDocRef = doc(db, 'online_users', currentUser.uid);
 
@@ -142,7 +142,7 @@ export function usePresence(currentUser: ChatUser | null, activeRoomId: string) 
 
   // Debounced typing emitter (3-second sliding window)
   const sendTyping = useCallback(async () => {
-    if (!currentUser || !activeRoomId) return;
+    if (!currentUser || currentUser.isAnonymous || !activeRoomId) return;
 
     const now = Date.now();
     const typingDocRef = doc(db, `rooms/${activeRoomId}/typing`, currentUser.uid);

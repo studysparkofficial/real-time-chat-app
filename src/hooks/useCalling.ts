@@ -31,13 +31,13 @@ export function useCalling(
 
   // Browser push permission is requested only after the user explicitly enables alerts.
   useEffect(() => {
-    if (currentUser?.uid) {
+    if (currentUser?.uid && !currentUser.isAnonymous) {
       callSignalingService.registerUser(currentUser.uid);
       void callSignalingService.getCallHistory(currentUser.uid).then((history) => {
         setCallHistory(history);
       });
     }
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, currentUser?.isAnonymous]);
 
   // Clear timeout helper
   const clearCallTimeout = useCallback(() => {

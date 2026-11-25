@@ -101,7 +101,7 @@ export function useNotifications(currentUser: ChatUser | null) {
   }, []);
 
   useEffect(() => {
-    const uid = currentUser?.uid;
+    const uid = currentUser?.isAnonymous ? undefined : currentUser?.uid;
     if (!uid) {
       setLatestNotifications([]);
       setUnreadCount(0);

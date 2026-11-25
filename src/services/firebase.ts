@@ -141,14 +141,31 @@ export async function signUpEmail(email: string, pass: string, displayName?: str
   return cred.user;
 }
 
-// Guest Sign-In
-export async function signInGuest(displayName?: string): Promise<FirebaseUser> {
-  const cred = await signInAnonymously(auth);
-  if (cred.user) {
-    const guestName = displayName || `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
-    await updateProfile(cred.user, { displayName: guestName });
+// Guest Sign-In (falls back to null when Anonymous Auth is disabled in Firebase Console)
+export async function signInGuest(displayName?: string): Promise<FirebaseUser | null> {
+  const guestName = displayName || `Guest_${Math.floor(1000 + Math.random() * 9000)}`;
+  try {
+    const cred = await signInAnonymously(auth);
+    if (cred.user) {
+      try {
+        await updateProfile(cred.user, { displayName: guestName });
+      } catch {
+        // Profile update failure should not block guest access
+      }
+    }
+    return cred.user;
+  } catch (err: unknown) {
+    const code = (err as { code?: string })?.code || '';
+    if (
+      code === 'auth/operation-not-allowed' ||
+      code === 'auth/admin-restricted-operation' ||
+      code === 'auth/unauthorized-domain'
+    ) {
+      console.warn(`[Auth] Anonymous auth unavailable (${code}); falling back to read-only guest session.`);
+      return null;
+    }
+    throw err;
   }
-  return cred.user;
 }
 
 // Sign out

@@ -6,6 +6,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isFullMember() {
+      return isAuthenticated()
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
     function isOwner(uid) {
       return isAuthenticated() && request.auth.uid == uid;
     }
@@ -16,7 +21,7 @@ service cloud.firestore {
 
     function isDirectRoomMember(roomId) {
       let roomPath = /databases/$(database)/documents/rooms/$(roomId);
-      return isAuthenticated()
+      return isFullMember()
         && isDirectRoomId(roomId)
         && exists(roomPath)
         && get(roomPath).data.type == 'direct'
@@ -25,8 +30,7 @@ service cloud.firestore {
     }
 
     function canReadRoomMessages(roomId) {
-      return isAuthenticated()
-        && (!isDirectRoomId(roomId) || isDirectRoomMember(roomId));
+      return !isDirectRoomId(roomId) || isDirectRoomMember(roomId);
     }
 
     // Message validation helpers.
@@ -100,12 +104,15 @@ service cloud.firestore {
     match /rooms/{roomId} {
       // A transaction may probe a deterministic ID before creating it. An
       // existing direct room remains readable only to its two participants.
-      allow get: if isAuthenticated()
+      allow get: if isFullMember()
         && (!exists(/databases/$(database)/documents/rooms/$(roomId))
           || isDirectRoomMember(roomId));
-      allow list: if isDirectRoomMember(roomId);
+      allow list: if isFullMember()
+        && resource.data.type == 'direct'
+        && resource.data.participants is list
+        && resource.data.participants.hasAny([request.auth.uid]);
 
-      allow create: if isAuthenticated()
+      allow create: if isFullMember()
         && isDirectRoomId(roomId)
         && request.resource.data.keys().hasOnly([
           'type', 'participants', 'participantInfo', 'createdAt',
@@ -126,7 +133,11 @@ service cloud.firestore {
 
       // Participants can update only the latest-message preview. Membership,
       // participant labels, and creation time remain fixed after creation.
-      allow update: if isDirectRoomMember(roomId)
+      allow update: if isFullMember()
+        && isDirectRoomId(roomId)
+        && resource.data.type == 'direct'
+        && resource.data.participants is list
+        && resource.data.participants.hasAny([request.auth.uid])
         && request.resource.data.type == resource.data.type
         && request.resource.data.participants == resource.data.participants
         && request.resource.data.participantInfo == resource.data.participantInfo
@@ -147,9 +158,12 @@ service cloud.firestore {
     match /rooms/{roomId}/messages/{messageId} {
       allow read: if canReadRoomMessages(roomId);
 
-      // Creating a message: must be from the authenticated sender
-      allow create: if canReadRoomMessages(roomId)
+      // Creating a message: must be from a full (non-guest) authenticated sender
+      allow create: if isFullMember()
+        && canReadRoomMessages(roomId)
         && hasField(request.resource.data, 'sender')
+        && request.resource.data.sender is map
+        && hasField(request.resource.data.sender, 'uid')
         && request.resource.data.sender.uid == request.auth.uid
         && (!hasField(request.resource.data, 'text') || isValidText(request.resource.data.text))
         && (!hasField(request.resource.data, 'attachment') || isValidAttachment(request.resource.data.attachment))
@@ -162,22 +176,24 @@ service cloud.firestore {
             && request.resource.data.attachment != null)
         );
 
-      // Updating a message: allows emoji reactions by any room member, or editing by owner
-      allow update: if canReadRoomMessages(roomId)
+      // Updating a message: allows emoji reactions by any full room member, or editing by owner
+      allow update: if isFullMember()
+        && canReadRoomMessages(roomId)
         && (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) ||
           resource.data.sender.uid == request.auth.uid
         );
 
       // Deleting a message: sender only
-      allow delete: if canReadRoomMessages(roomId)
+      allow delete: if isFullMember()
+        && canReadRoomMessages(roomId)
         && resource.data.sender.uid == request.auth.uid;
     }
 
     // Room typing indicators
     match /rooms/{roomId}/typing/{userKey} {
       allow read: if canReadRoomMessages(roomId);
-      allow write: if canReadRoomMessages(roomId) && request.auth.uid == userKey;
+      allow write: if isFullMember() && canReadRoomMessages(roomId) && request.auth.uid == userKey;
     }
 
     // Only direct-chat participants can see receipts. Each participant may
@@ -258,8 +274,8 @@ service cloud.firestore {
     // Minimal profiles power the searchable New Chat picker. Email addresses
     // are intentionally excluded from this public-to-members directory.
     match /user_profiles/{uid} {
-      allow read: if isAuthenticated();
-      allow create, update: if isOwner(uid)
+      allow read: if isFullMember();
+      allow create, update: if isFullMember() && isOwner(uid)
         && request.resource.data.uid == uid
         && request.resource.data.keys().hasOnly([
           'uid', 'displayName', 'displayNameLower', 'photoURL', 'isAnonymous',
@@ -274,14 +290,14 @@ service cloud.firestore {
 
     // Online users presence
     match /online_users/{userKey} {
-      allow read: if isAuthenticated();
-      allow write: if isOwner(userKey);
+      allow read: if true;
+      allow write: if isFullMember() && isOwner(userKey);
     }
 
     // Custom channels
     match /custom_rooms/{roomId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated()
+      allow read: if true;
+      allow create: if isFullMember()
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.name is string
         && request.resource.data.name.size() > 0
@@ -289,15 +305,15 @@ service cloud.firestore {
         && request.resource.data.slug is string
         && request.resource.data.slug.size() > 0
         && request.resource.data.slug.size() <= 60;
-      allow update, delete: if isAuthenticated()
+      allow update, delete: if isFullMember()
         && resource.data.createdBy == request.auth.uid;
     }
 
     // Call Signaling for Voice & Video calls
     match /calls/{callId} {
-      allow read: if isAuthenticated()
+      allow read: if isFullMember()
         && (resource.data.caller.uid == request.auth.uid || resource.data.recipient.uid == request.auth.uid);
-      allow create: if isAuthenticated()
+      allow create: if isFullMember()
         && request.resource.data.keys().hasOnly([
           'id', 'conversationId', 'caller', 'recipient', 'callType', 'status',
           'meetingId', 'createdAt', 'answeredAt', 'endedAt', 'endedReason'

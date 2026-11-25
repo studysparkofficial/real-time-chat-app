@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Mail, Lock, User, UserCheck, ShieldCheck } from 'lucide-react';
 import { Button } from '../common/Button';
 
@@ -9,6 +9,8 @@ interface AuthModalProps {
   onEmailSignIn: (email: string, pass: string) => Promise<void>;
   onEmailSignUp: (email: string, pass: string, name: string) => Promise<void>;
   onGuestSignIn: (guestName?: string) => Promise<void>;
+  promptMessage?: string | null;
+  isGuestSession?: boolean;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
@@ -17,7 +19,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onGoogleSignIn,
   onEmailSignIn,
   onEmailSignUp,
-  onGuestSignIn
+  onGuestSignIn,
+  promptMessage = null,
+  isGuestSession = false
 }) => {
   const [mode, setMode] = useState<'signin' | 'signup' | 'guest'>('signin');
   const [email, setEmail] = useState('');
@@ -26,6 +30,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [guestName, setGuestName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen && (isGuestSession || promptMessage)) {
+      setMode('signin');
+      setError(null);
+    }
+  }, [isOpen, isGuestSession, promptMessage]);
 
   if (!isOpen) return null;
 
@@ -215,6 +226,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </button>
         </div>
 
+        {(promptMessage || isGuestSession) && mode !== 'guest' && (
+          <div
+            style={{
+              padding: '10px 14px',
+              borderRadius: '10px',
+              background: 'rgba(212, 175, 55, 0.14)',
+              border: '1px solid rgba(212, 175, 55, 0.35)',
+              color: 'var(--accent-gold)',
+              fontSize: '13px',
+              fontWeight: 600,
+              marginBottom: '16px'
+            }}
+          >
+            {promptMessage || 'Guest Pass is read-only. Sign in with your Google account to send messages, media, and interact.'}
+          </div>
+        )}
+
         {error && (
           <div
             style={{
@@ -364,7 +392,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 />
               </div>
               <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-                Guest entry allows immediate real-time chat with no signup needed.
+                Guest Pass grants read-only access to view chats and media. Sign in with Google to send messages or upload files.
               </p>
             </div>
           ) : (

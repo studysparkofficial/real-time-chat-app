@@ -26,7 +26,7 @@ export function useDirectMessages(currentUser: ChatUser | null) {
   const [lastReadAt, setLastReadAt] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    if (!currentUser?.uid) {
+    if (!currentUser?.uid || currentUser.isAnonymous) {
       setConversations([]);
       setLastReadAt({});
       return;

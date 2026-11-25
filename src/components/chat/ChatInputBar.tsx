@@ -32,6 +32,8 @@ interface ChatInputBarProps {
   onStartRecording: () => void;
   onStopRecording: () => Promise<File | null>;
   onCancelRecording: () => void;
+  isReadOnlyGuest?: boolean;
+  onRequireAuth?: () => void;
 }
 
 const COMMON_EMOJIS = ['🎓', '☕', '📚', '🏛️', '🔥', '👍', '❤️', '🎉', '🚀', '✨', '👀', '💯'];
@@ -54,7 +56,9 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   onClipboardPaste,
   onStartRecording,
   onStopRecording,
-  onCancelRecording
+  onCancelRecording,
+  isReadOnlyGuest = false,
+  onRequireAuth
 }) => {
   const [text, setText] = useState('');
   const [showEmojiTray, setShowEmojiTray] = useState(false);
@@ -127,6 +131,10 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
   };
 
   const handleSend = async () => {
+    if (isReadOnlyGuest) {
+      onRequireAuth?.();
+      return;
+    }
     if (!text.trim() && !stagedFile) return;
     const currentText = text;
     setText('');
@@ -422,7 +430,13 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             {/* Emoji Trigger */}
             <button
               type="button"
-              onClick={() => setShowEmojiTray(!showEmojiTray)}
+              onClick={() => {
+                if (isReadOnlyGuest) {
+                  onRequireAuth?.();
+                  return;
+                }
+                setShowEmojiTray(!showEmojiTray);
+              }}
               className="pill-icon-btn"
               title="Emoji"
               aria-label="Insert Emoji"
@@ -447,7 +461,13 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             {/* Attachment Tool */}
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => {
+                if (isReadOnlyGuest) {
+                  onRequireAuth?.();
+                  return;
+                }
+                fileInputRef.current?.click();
+              }}
               className="pill-icon-btn"
               title="Send Photo, Video or PDF"
               aria-label="Send Photo, Video or PDF"
@@ -458,7 +478,13 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             {/* Code Snippet Editor Trigger */}
             <button
               type="button"
-              onClick={handleCodeBlock}
+              onClick={() => {
+                if (isReadOnlyGuest) {
+                  onRequireAuth?.();
+                  return;
+                }
+                handleCodeBlock();
+              }}
               className="pill-icon-btn pill-btn-code"
               title="Insert Code Snippet"
               aria-label="Insert Code Snippet"
@@ -470,17 +496,36 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             <textarea
               ref={textareaRef}
               className="pill-textarea"
-              placeholder={placeholder}
+              placeholder={isReadOnlyGuest ? 'Read-only Guest Pass — Sign in with Google to send messages & media' : placeholder}
               rows={1}
-              value={text}
+              readOnly={isReadOnlyGuest}
+              value={isReadOnlyGuest ? '' : text}
+              onClick={() => {
+                if (isReadOnlyGuest) onRequireAuth?.();
+              }}
               onChange={handleChange}
               onKeyDown={handleKeyDown}
-              onPaste={onClipboardPaste}
-              onFocus={handleFocus}
+              onPaste={(e) => {
+                if (isReadOnlyGuest) {
+                  e.preventDefault();
+                  onRequireAuth?.();
+                  return;
+                }
+                onClipboardPaste(e);
+              }}
+              onFocus={(e) => {
+                if (isReadOnlyGuest) {
+                  e.currentTarget.blur();
+                  onRequireAuth?.();
+                  return;
+                }
+                handleFocus();
+              }}
               style={{
                 fontSize: '16px',
                 WebkitTextSizeAdjust: '100%',
-                touchAction: 'manipulation'
+                touchAction: 'manipulation',
+                cursor: isReadOnlyGuest ? 'pointer' : 'text'
               }}
             />
 
@@ -488,7 +533,13 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             {!text.trim() && !stagedFile && (
               <button
                 type="button"
-                onClick={onStartRecording}
+                onClick={() => {
+                  if (isReadOnlyGuest) {
+                    onRequireAuth?.();
+                    return;
+                  }
+                  onStartRecording();
+                }}
                 className="pill-icon-btn"
                 title="Record Voice Note"
                 aria-label="Record Voice Note"
@@ -503,7 +554,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
         <button
           type="button"
           onClick={handleSend}
-          disabled={!text.trim() && !stagedFile}
+          disabled={!isReadOnlyGuest && !text.trim() && !stagedFile}
           className="send-round-btn"
           title={isUploading ? 'Send to JNUverse (file uploads continue in the background)' : 'Send to JNUverse'}
           aria-label="Send Message"

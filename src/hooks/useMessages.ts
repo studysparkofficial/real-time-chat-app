@@ -425,7 +425,7 @@ export function useMessages(
       mentions: string[] = []
     ) => {
       if ((!text || !text.trim()) && !attachment) return;
-      if (!currentUser) return;
+      if (!currentUser || currentUser.isAnonymous) return;
 
       const clientTempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
       const optimisticMsg: ChatMessage = {
@@ -503,7 +503,7 @@ export function useMessages(
       replyTo?: MessageReplyReference | null,
       mentions: string[] = []
     ): string | null => {
-      if (!currentUser) return null;
+      if (!currentUser || currentUser.isAnonymous) return null;
 
       const clientTempId = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
       const optimisticMsg: ChatMessage = {
@@ -665,7 +665,7 @@ export function useMessages(
   // Interactive Emoji Reactions
   const toggleReaction = useCallback(
     async (messageId: string, emoji: string) => {
-      if (!currentUser) return;
+      if (!currentUser || currentUser.isAnonymous) return;
       const msg = messages.find((m) => m.id === messageId);
       if (!msg || msg.status === 'sending' || msg.status === 'failed') return;
 
@@ -701,7 +701,7 @@ export function useMessages(
   // Delete message (sender only)
   const deleteMessage = useCallback(
     async (messageId: string) => {
-      if (!currentUser) return;
+      if (!currentUser || currentUser.isAnonymous) return;
       const message = messages.find((item) => item.id === messageId);
       if (!message || message.status === 'sending' || message.status === 'failed') return;
       try {

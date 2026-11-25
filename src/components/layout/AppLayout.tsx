@@ -245,14 +245,18 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             jumpToMessageId={jumpToMessageId}
             onJumpMessageComplete={onJumpMessageComplete}
             onRetry={onRetryMessage}
-            onReply={(msg) =>
+            onReply={(msg) => {
+              if (currentUser?.isAnonymous) {
+                onOpenAuthModal();
+                return;
+              }
               onSetReplyTo({
                 id: msg.id,
                 text: msg.text || (msg.attachment ? `[${msg.attachment.category}]` : ''),
                 senderName: msg.sender.displayName,
                 senderUid: msg.sender.uid
-              })
-            }
+              });
+            }}
             onReaction={onReaction}
             onDelete={onDeleteMessage}
             onImageClick={onImageClick}
@@ -287,6 +291,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           onStartRecording={onStartRecording}
           onStopRecording={onStopRecording}
           onCancelRecording={onCancelRecording}
+          isReadOnlyGuest={Boolean(currentUser?.isAnonymous)}
+          onRequireAuth={onOpenAuthModal}
         />
       </main>
 
