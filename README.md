@@ -85,8 +85,8 @@ Push requires HTTPS (localhost is suitable for development), a deployed service 
 4. Add the matching public key to the frontend build environment as `VITE_WEB_PUSH_VAPID_PUBLIC_KEY` and to `functions/.env.<firebase-project-id>` as `WEB_PUSH_VAPID_PUBLIC_KEY`.
 5. Set `WEB_PUSH_CONTACT_EMAIL` in `functions/.env.<firebase-project-id>` to a monitored contact, for example `mailto:notifications@example.com`.
 6. Ensure `VITE_FIREBASE_FUNCTIONS_REGION` in the frontend build and `setGlobalOptions({ region: ... })` in `functions/index.js` use the same region. Change the default `us-central1` if the Firestore database is hosted elsewhere.
-7. Deploy the Firestore rules, indexes/TTL policies, and notification functions: `firebase deploy --only firestore:rules,firestore:indexes,functions`.
-8. TTL cleanup is eventual (Firestore may take up to 24 hours after expiry to delete a record) and incurs standard delete-operation charges. The TTL policies are included in `firestore.indexes.json`.
+7. Deploy the Firestore rules, query indexes, and notification functions: `firebase deploy --only firestore:rules,firestore:indexes,functions`.
+8. Automatic TTL cleanup is disabled in `firestore.indexes.json` so index deployment works without billing. To enable expiry cleanup for notification and session records, enable billing and add `"ttl": true` to the relevant `expiresAt` field overrides. TTL deletion is eventual (up to 24 hours) and incurs standard delete-operation charges.
 
 `VITE_WEB_PUSH_VAPID_PUBLIC_KEY` and the functions runtime public key must match. The private VAPID key belongs only in Secret Manager. Firebase may require enabling Cloud Functions/Cloud Build and billing for the project before deployment. Set a non-placeholder VAPID contact email before production use.
 

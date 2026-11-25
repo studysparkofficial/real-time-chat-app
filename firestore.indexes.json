@@ -21,31 +21,26 @@
     {
       "collectionGroup": "notifications",
       "fieldPath": "expiresAt",
-      "ttl": true,
       "indexes": []
     },
     {
       "collectionGroup": "notification_events",
       "fieldPath": "expiresAt",
-      "ttl": true,
       "indexes": []
     },
     {
       "collectionGroup": "security_sessions",
       "fieldPath": "expiresAt",
-      "ttl": true,
       "indexes": []
     },
     {
       "collectionGroup": "call_notification_events",
       "fieldPath": "expiresAt",
-      "ttl": true,
       "indexes": []
     },
     {
       "collectionGroup": "call_rate_limits",
       "fieldPath": "expiresAt",
-      "ttl": true,
       "indexes": []
     }
   ]
