@@ -246,11 +246,12 @@ export const App: React.FC = () => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Amazon Chime SDK Audio & Video Calling Hook
+  // WebRTC calls use Firestore for call setup and ICE signaling.
   const {
     activeCall,
     incomingCall,
-    meetingCredentials,
+    localStream,
+    remoteStream,
     callHistory,
     startCall,
     acceptCall,
@@ -935,8 +936,9 @@ export const App: React.FC = () => {
       {activeCall && activeCall.status === 'connected' && currentUser && (
         <CallWindow
           activeCall={activeCall}
-          credentials={meetingCredentials}
           currentUserId={currentUser.uid}
+          localStream={localStream}
+          remoteStream={remoteStream}
           onEndCall={endCall}
         />
       )}

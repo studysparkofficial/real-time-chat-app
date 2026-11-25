@@ -37,11 +37,15 @@ Create a Firestore database and configure security rules for the sign-in methods
 
 Direct chats use `rooms/dm_*/messages`, with a participant list on the parent conversation document. The included rules restrict those messages and typing indicators to the two participants; read state is stored per user. Deploy the rules and conversation index with `firebase deploy --only firestore:rules,firestore:indexes`. Member search profiles are created when users sign in, so existing members appear after they next open the app.
 
+## Voice and video calls
+
+Calls are one-to-one WebRTC sessions. The browser captures microphone/camera media and sends it directly to the other participant; Firestore carries the call offer, answer, and ICE candidates. Calls require a signed-in non-anonymous account, HTTPS, and microphone/camera permission. Deploy the Firestore rules and call index with `firebase deploy --only firestore:rules,firestore:indexes` before testing calls. The client uses public STUN servers by default; reliable connections on restrictive networks may also require a TURN service with short-lived credentials.
+
 These rules provide access control within JNUverse; they do not provide WhatsApp-style end-to-end encryption. If the S3 download API is enabled for direct-message attachments, its signer must also verify the requester is listed in the conversation participants before issuing a download URL. The API uses privileged access and does not inherit Firestore client rules.
 
 ## Notifications
 
-The notification system uses the app's existing Cloud Firestore database. Firestore listeners keep the bell and notification center current across a user's signed-in devices. Second-generation Firebase Cloud Functions create recipient notifications from message, reaction, call, and first-browser-session events. The service worker handles background Web Push and notification clicks. This adds no AWS notification service; AWS remains used for the existing Chime calling and S3 media paths.
+The notification system uses the app's existing Cloud Firestore database. Firestore listeners keep the bell and notification center current across a user's signed-in devices. Second-generation Firebase Cloud Functions create recipient notifications from message, reaction, call, and first-browser-session events. The service worker handles background Web Push and notification clicks. AWS is used for S3 media paths; voice and video use browser WebRTC with Firestore signaling.
 
 ### Events supported by the current app
 
@@ -88,13 +92,13 @@ Push requires HTTPS (localhost is suitable for development), a deployed service 
 
 ### Development and verification
 
-Run `npm run build` for the web app and `npm run test:notifications` for the notification policy tests. The tests cover direct/channel preference defaults, category gates, quiet hours across midnight, preview privacy, and message aggregation. For a full multi-user test, deploy the rules/functions to a Firebase project or use the Firebase Emulator Suite, configure a VAPID pair, sign in as two separate users, and use two browsers/devices to verify message, mention, reaction, call, offline, mute, and cross-device behavior. The local unit tests do not send real browser push messages.
+Run `npm run build` for the web app and `npm run test:notifications` for the notification policy tests. The tests cover direct/channel preference defaults, category gates, quiet hours across midnight, preview privacy, and message aggregation. For a full multi-user test, deploy the rules/functions to a Firebase project or use the Firebase Emulator Suite, configure a VAPID pair, sign in as two separate users, and use two browsers/devices to verify message, mention, reaction, call, offline, mute, and cross-device behavior. The local unit tests do not send real browser push messages or exercise WebRTC media negotiation.
 
 To exercise Auth, Firestore rules, and Functions locally, install the Firebase CLI and run `firebase emulators:start --only auth,firestore,functions,ui`. In the Vite environment set `VITE_USE_FIREBASE_EMULATORS=true` and, if needed, `VITE_FIREBASE_EMULATOR_HOST=127.0.0.1`. The app uses the `us-central1` Functions region by default. Browser push delivery still needs a valid VAPID pair and a browser subscription; emulator runs alone do not verify delivery through a browser push service.
 
 ### Remaining scope
 
-The current checks verify policy helpers and the production frontend build. They do not emulate Firebase Authentication, Firestore rules, Cloud Functions delivery, browser push services, or Amazon Chime. Those integration scenarios require the Firebase Emulator Suite or a configured deployed Firebase project and real browser subscriptions. The existing public channels also have no membership records, so broad group delivery is restricted to explicit mentions/replies and users who opted in.
+The local checks do not emulate Firebase Authentication, Firestore rules, Cloud Functions delivery, browser push services, or WebRTC media negotiation. Those integration scenarios require the Firebase Emulator Suite or a configured deployed Firebase project and real browser subscriptions. The existing public channels also have no membership records, so broad group delivery is restricted to explicit mentions/replies and users who opted in.
 
 ## AWS S3 media storage
 

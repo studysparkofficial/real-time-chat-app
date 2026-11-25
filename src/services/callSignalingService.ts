@@ -1,4 +1,3 @@
-import { io, Socket } from 'socket.io-client';
 import {
   db,
   doc,
@@ -15,246 +14,123 @@ import {
 import { CallSession, CallStatus, CallHistoryItem } from '../types/chat.types';
 
 class CallSignalingService {
-  private socket: Socket | null = null;
-  private currentUserId: string | null = null;
-
-  constructor() {
-    this.initSocketIfAvailable();
-  }
-
-  private initSocketIfAvailable(): void {
-    if (typeof window === 'undefined') return;
-
-    // Connect to Socket.IO if server is accessible
-    try {
-      this.socket = io({
-        autoConnect: true,
-        reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 2000,
-        transports: ['websocket', 'polling']
-      });
-
-      this.socket.on('connect', () => {
-        if (this.currentUserId) {
-          this.socket?.emit('register_user', { uid: this.currentUserId });
-        }
-      });
-    } catch {
-      // Socket.IO optional
-      this.socket = null;
-    }
-  }
-
-  public registerUser(userId: string): void {
-    this.currentUserId = userId;
-    if (this.socket && this.socket.connected) {
-      this.socket.emit('register_user', { uid: userId });
-    }
-  }
-
-  /**
-   * Create a new call document in Firestore and emit socket event if available
-   */
+  /** Create an outgoing call document containing its initial WebRTC offer. */
   public async createCall(session: CallSession): Promise<void> {
-    const callRef = doc(db, 'calls', session.id);
-    await setDoc(callRef, {
-      ...session,
-      createdAt: session.createdAt || Date.now()
-    });
-
-    if (this.socket?.connected) {
-      this.socket.emit('call:initiate', {
-        toUid: session.recipient.uid,
-        callSession: session
-      });
-    }
+    if (!session.offer) throw new Error('A WebRTC offer is required to start a call.');
+    const payload = {
+      id: session.id,
+      ...(session.conversationId ? { conversationId: session.conversationId } : {}),
+      caller: {
+        uid: session.caller.uid,
+        displayName: session.caller.displayName,
+        photoURL: session.caller.photoURL ?? null
+      },
+      recipient: {
+        uid: session.recipient.uid,
+        displayName: session.recipient.displayName,
+        photoURL: session.recipient.photoURL ?? null
+      },
+      callType: session.callType,
+      status: 'ringing',
+      createdAt: session.createdAt || Date.now(),
+      offer: session.offer
+    };
+    await setDoc(doc(db, 'calls', session.id), payload);
   }
 
-  /**
-   * Listen for incoming calls where recipient matches current user and status is ringing
-   */
+  /** Store the recipient's WebRTC answer and mark the call accepted atomically. */
+  public async acceptCallWithAnswer(
+    callId: string,
+    answer: NonNullable<CallSession['answer']>
+  ): Promise<void> {
+    await updateDoc(doc(db, 'calls', callId), {
+      status: 'accepted',
+      answer,
+      answeredAt: Date.now()
+    });
+  }
+
+  public async setScreenShare(callId: string, userId: string | null): Promise<void> {
+    await updateDoc(doc(db, 'calls', callId), { screenShareBy: userId });
+  }
+
   public subscribeToIncomingCalls(
     userId: string,
     onIncomingCall: (call: CallSession) => void
   ): () => void {
-    this.registerUser(userId);
-
-    // 1. Primary real-time listener via Firestore
-    const callsCol = collection(db, 'calls');
-    const q = query(
-      callsCol,
+    const incomingCalls = query(
+      collection(db, 'calls'),
       where('recipient.uid', '==', userId),
-      where('status', 'in', ['ringing', 'initiating'])
+      where('status', '==', 'ringing')
     );
+    const seenCallIds = new Set<string>();
 
-    const unsubFirestore = onSnapshot(
-      q,
+    return onSnapshot(
+      incomingCalls,
       (snapshot) => {
         snapshot.docChanges().forEach((change) => {
-          if (change.type === 'added' || change.type === 'modified') {
-            const data = change.doc.data() as CallSession;
-            // Only alert if call was created within the last 45 seconds
-            const ageMs = Date.now() - (data.createdAt || 0);
-            if (ageMs < 45000 && data.status === 'ringing') {
-              onIncomingCall(data);
-            }
+          if (change.type !== 'added' || seenCallIds.has(change.doc.id)) return;
+          const session = change.doc.data() as CallSession;
+          const ageMs = Date.now() - (session.createdAt || 0);
+          if (ageMs < 45000 && session.status === 'ringing') {
+            seenCallIds.add(change.doc.id);
+            onIncomingCall(session);
           }
         });
       },
-      (err) => {
-        console.warn('[CallSignaling] Incoming calls listener warning:', err);
-      }
+      (error) => console.warn('[CallSignaling] Incoming calls listener warning:', error)
     );
-
-    // 2. Secondary low-latency listener via Socket.IO
-    const handleSocketIncoming = (callSession: CallSession) => {
-      if (callSession.recipient?.uid === userId && callSession.status === 'ringing') {
-        onIncomingCall(callSession);
-      }
-    };
-
-    if (this.socket) {
-      this.socket.on('call:incoming', handleSocketIncoming);
-    }
-
-    return () => {
-      unsubFirestore();
-      if (this.socket) {
-        this.socket.off('call:incoming', handleSocketIncoming);
-      }
-    };
   }
 
-  /**
-   * Listen for updates to a specific call session
-   */
   public subscribeToCall(
     callId: string,
     onUpdate: (call: CallSession) => void
   ): () => void {
-    const callRef = doc(db, 'calls', callId);
-
-    const unsubFirestore = onSnapshot(
-      callRef,
+    return onSnapshot(
+      doc(db, 'calls', callId),
       (snapshot) => {
-        if (snapshot.exists()) {
-          onUpdate(snapshot.data() as CallSession);
-        }
+        if (snapshot.exists()) onUpdate(snapshot.data() as CallSession);
       },
-      (err) => {
-        console.warn(`[CallSignaling] Error subscribing to call ${callId}:`, err);
-      }
+      (error) => console.warn(`[CallSignaling] Error subscribing to call ${callId}:`, error)
     );
-
-    const handleSocketAccepted = (data: { callId: string }) => {
-      if (data.callId === callId) {
-        onUpdate({ id: callId, status: 'accepted' } as CallSession);
-      }
-    };
-
-    const handleSocketRejected = (data: { callId: string; reason?: string }) => {
-      if (data.callId === callId) {
-        onUpdate({
-          id: callId,
-          status: 'rejected',
-          endedReason: (data.reason as CallSession['endedReason']) || 'declined'
-        } as CallSession);
-      }
-    };
-
-    const handleSocketEnded = (data: { callId: string }) => {
-      if (data.callId === callId) {
-        onUpdate({ id: callId, status: 'ended', endedReason: 'completed' } as CallSession);
-      }
-    };
-
-    const handleSocketBusy = (data: { callId: string }) => {
-      if (data.callId === callId) {
-        onUpdate({ id: callId, status: 'busy', endedReason: 'busy' } as CallSession);
-      }
-    };
-
-    if (this.socket) {
-      this.socket.on('call:accepted', handleSocketAccepted);
-      this.socket.on('call:rejected', handleSocketRejected);
-      this.socket.on('call:ended', handleSocketEnded);
-      this.socket.on('call:busy', handleSocketBusy);
-    }
-
-    return () => {
-      unsubFirestore();
-      if (this.socket) {
-        this.socket.off('call:accepted', handleSocketAccepted);
-        this.socket.off('call:rejected', handleSocketRejected);
-        this.socket.off('call:ended', handleSocketEnded);
-        this.socket.off('call:busy', handleSocketBusy);
-      }
-    };
   }
 
-  /**
-   * Update the status of a call session
-   */
   public async updateCallStatus(
     callId: string,
     status: CallStatus,
     extra: Partial<CallSession> = {}
   ): Promise<void> {
     try {
-      const callRef = doc(db, 'calls', callId);
-      const { recipient: socketRecipient, ...persistedExtra } = extra;
-      const updates: Record<string, any> = {
-        status,
-        ...persistedExtra
-      };
-
-      if (status === 'accepted') {
-        updates.answeredAt = updates.answeredAt || Date.now();
-      } else if (['ended', 'rejected', 'busy', 'missed', 'failed'].includes(status)) {
+      const { recipient: _recipient, offer: _offer, answer: _answer, ...persistedExtra } = extra;
+      const updates: Record<string, any> = { status, ...persistedExtra };
+      if (['ended', 'rejected', 'busy', 'missed', 'failed'].includes(status)) {
         updates.endedAt = updates.endedAt || Date.now();
       }
-
-      await updateDoc(callRef, updates);
-
-      // Notify via Socket.IO if peer UID is provided in extra
-      if (this.socket?.connected && socketRecipient?.uid) {
-        const toUid = socketRecipient.uid;
-        if (status === 'ringing') this.socket.emit('call:ringing', { toUid, callId });
-        if (status === 'accepted') this.socket.emit('call:accept', { toUid, callId });
-        if (status === 'rejected') this.socket.emit('call:reject', { toUid, callId, reason: extra.endedReason });
-        if (status === 'busy') this.socket.emit('call:busy', { toUid, callId });
-        if (status === 'ended') this.socket.emit('call:end', { toUid, callId });
-      }
-    } catch (err) {
-      console.warn(`[CallSignaling] Error updating call status for ${callId}:`, err);
+      await updateDoc(doc(db, 'calls', callId), updates);
+    } catch (error) {
+      console.warn(`[CallSignaling] Error updating call status for ${callId}:`, error);
     }
   }
 
-  /**
-   * Save a call record into user's private call history
-   */
   public async saveCallHistory(userId: string, historyItem: CallHistoryItem): Promise<void> {
     try {
-      const historyRef = doc(db, 'user_private', userId, 'call_history', historyItem.id);
-      await setDoc(historyRef, historyItem);
-    } catch (err) {
-      console.warn('[CallSignaling] Failed to save call history:', err);
+      await setDoc(doc(db, 'user_private', userId, 'call_history', historyItem.id), historyItem);
+    } catch (error) {
+      console.warn('[CallSignaling] Failed to save call history:', error);
     }
   }
 
-  /**
-   * Fetch recent call history for current user
-   */
   public async getCallHistory(userId: string, maxItems: number = 20): Promise<CallHistoryItem[]> {
     try {
-      const historyCol = collection(db, 'user_private', userId, 'call_history');
-      const q = query(historyCol, orderBy('timestamp', 'desc'), limit(maxItems));
-      const snapshot = await getDocs(q);
-
-      return snapshot.docs.map((d) => d.data() as CallHistoryItem);
-    } catch (err) {
-      console.warn('[CallSignaling] Failed to fetch call history:', err);
+      const history = query(
+        collection(db, 'user_private', userId, 'call_history'),
+        orderBy('timestamp', 'desc'),
+        limit(maxItems)
+      );
+      const snapshot = await getDocs(history);
+      return snapshot.docs.map((item) => item.data() as CallHistoryItem);
+    } catch (error) {
+      console.warn('[CallSignaling] Failed to fetch call history:', error);
       return [];
     }
   }

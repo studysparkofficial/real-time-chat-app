@@ -603,8 +603,7 @@ export const onCallUpdated = onDocumentUpdated({
   const after = event.data?.after.data();
   if (!before || !after || before.status === after.status) return;
   const callId = event.params.callId;
-  // updateCallStatus sometimes swaps the recipient field to address its socket
-  // peer. `before` retains the original person being called.
+  // Keep notifications tied to the original person called when the record was created.
   const recipientUid = before.recipient?.uid || after.recipient?.uid;
   const callerUid = after.caller?.uid;
   const terminal = ['accepted', 'rejected', 'busy', 'missed', 'ended', 'failed'].includes(after.status);

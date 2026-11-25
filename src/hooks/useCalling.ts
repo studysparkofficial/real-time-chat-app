@@ -1,13 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { callApiService } from '../services/callApiService';
 import { callSignalingService } from '../services/callSignalingService';
+import { webRtcCallService, WebRtcCallCallbacks } from '../services/webrtcCallService';
 import { callNotificationService } from '../services/callNotificationService';
 import {
   ChatUser,
   CallSession,
-  CallStatus,
   CallType,
-  ChimeMeetingCredentials,
   CallHistoryItem
 } from '../types/chat.types';
 
@@ -17,10 +15,10 @@ export function useCalling(
 ) {
   const [activeCall, setActiveCall] = useState<CallSession | null>(null);
   const [incomingCall, setIncomingCall] = useState<CallSession | null>(null);
-  const [meetingCredentials, setMeetingCredentials] = useState<ChimeMeetingCredentials | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [callHistory, setCallHistory] = useState<CallHistoryItem[]>([]);
 
-  // Timers and references
   const callTimeoutRef = useRef<number | null>(null);
   const activeCallRef = useRef<CallSession | null>(null);
   const incomingCallRef = useRef<CallSession | null>(null);
@@ -29,17 +27,6 @@ export function useCalling(
   activeCallRef.current = activeCall;
   incomingCallRef.current = incomingCall;
 
-  // Browser push permission is requested only after the user explicitly enables alerts.
-  useEffect(() => {
-    if (currentUser?.uid && !currentUser.isAnonymous) {
-      callSignalingService.registerUser(currentUser.uid);
-      void callSignalingService.getCallHistory(currentUser.uid).then((history) => {
-        setCallHistory(history);
-      });
-    }
-  }, [currentUser?.uid, currentUser?.isAnonymous]);
-
-  // Clear timeout helper
   const clearCallTimeout = useCallback(() => {
     if (callTimeoutRef.current !== null) {
       window.clearTimeout(callTimeoutRef.current);
@@ -47,309 +34,270 @@ export function useCalling(
     }
   }, []);
 
-  // Record completed/missed call in private call history
   const recordCallHistory = useCallback(
-    (
-      session: CallSession,
-      status: CallHistoryItem['status'],
-      durationSeconds: number = 0
-    ) => {
+    (session: CallSession, status: CallHistoryItem['status'], durationSeconds = 0) => {
       if (!currentUser?.uid) return;
-
       const isCaller = session.caller.uid === currentUser.uid;
-      const peer = isCaller ? session.recipient : session.caller;
-
       const historyItem: CallHistoryItem = {
         id: session.id,
-        peer,
+        peer: isCaller ? session.recipient : session.caller,
         direction: isCaller ? 'outgoing' : 'incoming',
         callType: session.callType,
         status,
         durationSeconds,
         timestamp: Date.now()
       };
-
-      setCallHistory((prev) => [historyItem, ...prev.filter((item) => item.id !== session.id)]);
+      setCallHistory((previous) => [historyItem, ...previous.filter((item) => item.id !== session.id)]);
       void callSignalingService.saveCallHistory(currentUser.uid, historyItem);
     },
     [currentUser?.uid]
   );
 
-  // 1. Subscribe to Incoming Calls targeting the current user
   useEffect(() => {
-    if (!currentUser?.uid) return;
+    if (currentUser?.uid && !currentUser.isAnonymous) {
+      void callSignalingService.getCallHistory(currentUser.uid).then(setCallHistory);
+    } else {
+      setCallHistory([]);
+    }
+  }, [currentUser?.uid, currentUser?.isAnonymous]);
 
-    const unsubIncoming = callSignalingService.subscribeToIncomingCalls(
-      currentUser.uid,
-      (call) => {
-        // Prevent duplicate or conflicting calls
-        if (activeCallRef.current || incomingCallRef.current) {
-          // If already on another call, reject with busy status
-          void callSignalingService.updateCallStatus(call.id, 'busy', {
-            endedReason: 'busy',
-            recipient: call.caller
-          });
-          return;
-        }
-
-        setIncomingCall(call);
-        callNotificationService.startIncomingRingtone();
-        // Ringing timeout (35s) for incoming call
+  const peerCallbacks = useCallback((callId: string): WebRtcCallCallbacks => ({
+    onLocalStream: (stream) => setLocalStream(stream),
+    onRemoteStream: (stream) => setRemoteStream(stream),
+    onConnectionState: (state) => {
+      if (state === 'connected') {
         clearCallTimeout();
-        callTimeoutRef.current = window.setTimeout(() => {
-          if (incomingCallRef.current?.id === call.id) {
-            callNotificationService.stopIncomingRingtone();
-            setIncomingCall(null);
-            void callSignalingService.updateCallStatus(call.id, 'missed', {
-              endedReason: 'timeout'
-            });
-            recordCallHistory(call, 'missed', 0);
-            addToast?.(`Missed ${call.callType} call from ${call.caller.displayName}`, 'info');
-          }
-        }, 35000);
+        callStartTimeRef.current = Date.now();
+        callNotificationService.stopOutgoingRingback();
+        callNotificationService.stopIncomingRingtone();
+        callNotificationService.playCallConnected();
+        setActiveCall((previous) => previous?.id === callId
+          ? { ...previous, status: 'connected' }
+          : previous);
+        return;
       }
-    );
+
+      if (state === 'failed' && activeCallRef.current?.id === callId) {
+        const failedCall = activeCallRef.current;
+        clearCallTimeout();
+        callNotificationService.stopOutgoingRingback();
+        callNotificationService.stopIncomingRingtone();
+        callNotificationService.playCallEnded();
+        addToast?.('WebRTC could not connect. This network may require a TURN relay.', 'error');
+        void callSignalingService.updateCallStatus(callId, 'failed', { endedReason: 'network_error' });
+        void webRtcCallService.endCall(callId);
+        if (failedCall) recordCallHistory(failedCall, 'canceled', 0);
+        callStartTimeRef.current = null;
+        setLocalStream(null);
+        setRemoteStream(null);
+        setActiveCall(null);
+      }
+    }
+  }), [addToast, clearCallTimeout, recordCallHistory]);
+
+  useEffect(() => {
+    if (!currentUser?.uid || currentUser.isAnonymous) return;
+
+    const unsubscribe = callSignalingService.subscribeToIncomingCalls(currentUser.uid, (call) => {
+      if (activeCallRef.current || incomingCallRef.current) {
+        void callSignalingService.updateCallStatus(call.id, 'busy', {
+          endedReason: 'busy',
+          recipient: call.caller
+        });
+        return;
+      }
+
+      setIncomingCall(call);
+      callNotificationService.startIncomingRingtone();
+      clearCallTimeout();
+      callTimeoutRef.current = window.setTimeout(() => {
+        if (incomingCallRef.current?.id !== call.id) return;
+        callNotificationService.stopIncomingRingtone();
+        setIncomingCall(null);
+        void callSignalingService.updateCallStatus(call.id, 'missed', { endedReason: 'timeout' });
+        recordCallHistory(call, 'missed', 0);
+        addToast?.(`Missed ${call.callType} call from ${call.caller.displayName}`, 'info');
+      }, 35000);
+    });
 
     return () => {
-      unsubIncoming();
+      unsubscribe();
       callNotificationService.stopIncomingRingtone();
       clearCallTimeout();
     };
-  }, [currentUser?.uid, clearCallTimeout, recordCallHistory, addToast]);
+  }, [currentUser?.uid, currentUser?.isAnonymous, clearCallTimeout, recordCallHistory, addToast]);
 
-  // 2. Subscribe to updates for the active call session
   useEffect(() => {
-    if (!activeCall?.id) return;
+    if (!activeCall?.id || activeCall.status === 'initiating') return;
+    const callId = activeCall.id;
 
-    const unsubCall = callSignalingService.subscribeToCall(activeCall.id, (updated) => {
-      // Recipient accepted the call!
+    const unsubscribe = callSignalingService.subscribeToCall(callId, (updated) => {
+      setActiveCall((previous) => previous?.id === callId
+        ? { ...previous, screenShareBy: updated.screenShareBy ?? null }
+        : previous);
+
       if (updated.status === 'accepted') {
         clearCallTimeout();
         callNotificationService.stopOutgoingRingback();
-        callNotificationService.playCallConnected();
-        callStartTimeRef.current = Date.now();
-        setActiveCall((prev) => (prev ? { ...prev, status: 'connected' } : null));
+        setActiveCall((previous) => previous?.id === callId && previous.status !== 'connected'
+          ? { ...previous, status: 'connecting' }
+          : previous);
         return;
       }
 
-      // Call was rejected by recipient
-      if (updated.status === 'rejected') {
+      if (updated.status === 'rejected' || updated.status === 'busy') {
         clearCallTimeout();
         callNotificationService.stopOutgoingRingback();
         callNotificationService.playCallEnded();
-        addToast?.(`${activeCall.recipient.displayName} declined the call`, 'info');
-        recordCallHistory(activeCall, 'rejected', 0);
+        const message = updated.status === 'rejected'
+          ? `${activeCall.recipient.displayName} declined the call`
+          : `${activeCall.recipient.displayName} is currently busy`;
+        addToast?.(message, 'info');
+        recordCallHistory(activeCall, updated.status, 0);
+        void webRtcCallService.endCall(callId);
+        callStartTimeRef.current = null;
+        setLocalStream(null);
+        setRemoteStream(null);
         setActiveCall(null);
-        setMeetingCredentials(null);
         return;
       }
 
-      // Recipient is busy on another call
-      if (updated.status === 'busy') {
+      if (updated.status === 'ended' || updated.status === 'missed' || updated.status === 'failed') {
         clearCallTimeout();
         callNotificationService.stopOutgoingRingback();
-        callNotificationService.playCallBusy();
-        addToast?.(`${activeCall.recipient.displayName} is currently busy`, 'info');
-        recordCallHistory(activeCall, 'busy', 0);
-        setActiveCall(null);
-        setMeetingCredentials(null);
-        return;
-      }
-
-      // Call was ended or timed out
-      if (updated.status === 'ended' || updated.status === 'missed') {
-        clearCallTimeout();
-        callNotificationService.stopOutgoingRingback();
+        callNotificationService.stopIncomingRingtone();
         callNotificationService.playCallEnded();
-
         const duration = callStartTimeRef.current
           ? Math.max(0, Math.floor((Date.now() - callStartTimeRef.current) / 1000))
           : 0;
-
-        recordCallHistory(activeCall, updated.status === 'missed' ? 'missed' : 'completed', duration);
+        const historyStatus: CallHistoryItem['status'] = updated.status === 'missed'
+          ? 'missed'
+          : updated.status === 'failed'
+            ? 'canceled'
+            : duration > 0 ? 'completed' : 'canceled';
+        recordCallHistory(activeCall, historyStatus, duration);
+        void webRtcCallService.endCall(callId);
+        callStartTimeRef.current = null;
+        setLocalStream(null);
+        setRemoteStream(null);
         setActiveCall(null);
-        setMeetingCredentials(null);
       }
     });
 
-    return () => {
-      unsubCall();
+    return () => unsubscribe();
+  }, [activeCall?.id, activeCall?.status, activeCall?.recipient.displayName, clearCallTimeout, recordCallHistory, addToast]);
+
+  const startCall = useCallback(async (peer: ChatUser, callType: CallType) => {
+    if (!currentUser || currentUser.isAnonymous) {
+      addToast?.('Sign in with Google or email to make calls', 'error');
+      return;
+    }
+    if (peer.uid === currentUser.uid) {
+      addToast?.('Cannot call yourself', 'error');
+      return;
+    }
+    if (activeCallRef.current || incomingCallRef.current) {
+      addToast?.('You are already in a call', 'info');
+      return;
+    }
+
+    const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const session: CallSession = {
+      id: callId,
+      caller: {
+        uid: currentUser.uid,
+        displayName: currentUser.displayName,
+        photoURL: currentUser.photoURL
+      },
+      recipient: {
+        uid: peer.uid,
+        displayName: peer.displayName,
+        photoURL: peer.photoURL
+      },
+      callType,
+      status: 'initiating',
+      createdAt: Date.now()
     };
-  }, [activeCall?.id, clearCallTimeout, recordCallHistory, addToast]);
 
-  /**
-   * Start an outgoing call (voice or video)
-   */
-  const startCall = useCallback(
-    async (peer: ChatUser, callType: CallType) => {
-      if (!currentUser) {
-        addToast?.('Please sign in to make calls', 'error');
-        return;
-      }
-
-      if (peer.uid === currentUser.uid) {
-        addToast?.('Cannot call yourself', 'error');
-        return;
-      }
-
-      if (activeCall || incomingCall) {
-        addToast?.('You are already in a call', 'info');
-        return;
-      }
-
-      const callId = `call_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-
-      const session: CallSession = {
-        id: callId,
-        caller: {
-          uid: currentUser.uid,
-          displayName: currentUser.displayName,
-          photoURL: currentUser.photoURL
-        },
-        recipient: {
-          uid: peer.uid,
-          displayName: peer.displayName,
-          photoURL: peer.photoURL
-        },
-        callType,
-        status: 'initiating',
-        createdAt: Date.now()
-      };
-
-      setActiveCall(session);
-      callNotificationService.startOutgoingRingback();
-
-      try {
-        // 1. Request Chime meeting and attendee credentials from backend
-        const response = await callApiService.createMeeting(peer.uid, callType, callId);
-
-        // 2. Publish call document to Firestore with status 'ringing'
-        const liveSession: CallSession = {
-          ...session,
-          status: 'ringing',
-          meetingId: response.meeting.MeetingId
-        };
-
-        await callSignalingService.createCall(liveSession);
-
-        setActiveCall(liveSession);
-        setMeetingCredentials({
-          Meeting: response.meeting,
-          Attendee: response.attendee
-        });
-
-        // 3. Set outgoing call timeout (35 seconds)
-        clearCallTimeout();
-        callTimeoutRef.current = window.setTimeout(async () => {
-          if (activeCallRef.current?.id === callId && activeCallRef.current.status === 'ringing') {
-            callNotificationService.stopOutgoingRingback();
-            callNotificationService.playCallEnded();
-            addToast?.(`${peer.displayName} is unavailable`, 'info');
-
-            await callSignalingService.updateCallStatus(callId, 'missed', {
-              endedReason: 'timeout'
-            });
-            await callApiService.endMeeting(response.meeting.MeetingId, callId);
-            recordCallHistory(liveSession, 'missed', 0);
-
-            setActiveCall(null);
-            setMeetingCredentials(null);
-          }
-        }, 35000);
-      } catch (err: unknown) {
-        const errorMsg = err instanceof Error ? err.message : 'Failed to start call';
-        console.error('[useCalling] Failed to start call:', err);
-        callNotificationService.stopOutgoingRingback();
-        callNotificationService.playCallEnded();
-        addToast?.(errorMsg, 'error');
-        setActiveCall(null);
-        setMeetingCredentials(null);
-      }
-    },
-    [currentUser, activeCall, incomingCall, clearCallTimeout, recordCallHistory, addToast]
-  );
-
-  /**
-   * Accept an incoming call
-   */
-  const acceptCall = useCallback(async () => {
-    if (!incomingCall || !currentUser) return;
-
-    clearCallTimeout();
-    callNotificationService.stopIncomingRingtone();
-
-    const callToAccept = incomingCall;
-    setIncomingCall(null);
-
-    setActiveCall({
-      ...callToAccept,
-      status: 'connecting'
-    });
+    setActiveCall(session);
+    callNotificationService.startOutgoingRingback();
 
     try {
-      if (!callToAccept.meetingId) {
-        throw new Error('Call is missing meeting information');
-      }
+      const streams = await webRtcCallService.startOutgoingCall(session, peerCallbacks(callId));
+      setLocalStream(streams.localStream);
+      setRemoteStream(streams.remoteStream);
+      setActiveCall((previous) => previous?.id === callId
+        ? { ...previous, status: previous.status === 'connected' ? 'connected' : 'ringing' }
+        : previous);
 
-      // 1. Join Chime meeting via backend
-      const response = await callApiService.joinMeeting(callToAccept.id, callToAccept.meetingId);
-
-      // 2. Update status in signaling
-      await callSignalingService.updateCallStatus(callToAccept.id, 'accepted', {
-        answeredAt: Date.now(),
-        recipient: callToAccept.caller
-      });
-
-      callNotificationService.playCallConnected();
-      callStartTimeRef.current = Date.now();
-
-      setActiveCall({
-        ...callToAccept,
-        status: 'connected'
-      });
-
-      setMeetingCredentials({
-        Meeting: { MeetingId: callToAccept.meetingId },
-        Attendee: response.attendee
-      });
-    } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : 'Failed to join call';
-      console.error('[useCalling] Accept call failed:', err);
+      clearCallTimeout();
+      callTimeoutRef.current = window.setTimeout(() => {
+        if (activeCallRef.current?.id !== callId || activeCallRef.current.status !== 'ringing') return;
+        callNotificationService.stopOutgoingRingback();
+        callNotificationService.playCallEnded();
+        addToast?.(`${peer.displayName} is unavailable`, 'info');
+        void callSignalingService.updateCallStatus(callId, 'missed', { endedReason: 'timeout' });
+        recordCallHistory({ ...session, status: 'missed' }, 'missed', 0);
+        void webRtcCallService.endCall(callId);
+        setLocalStream(null);
+        setRemoteStream(null);
+        setActiveCall(null);
+      }, 35000);
+    } catch (error) {
+      const wasCancelled = webRtcCallService.wasCallCancelled(callId);
+      const message = error instanceof Error ? error.message : 'Failed to start WebRTC call';
+      if (!wasCancelled) console.error('[useCalling] Failed to start WebRTC call:', error);
+      callNotificationService.stopOutgoingRingback();
       callNotificationService.playCallEnded();
-      addToast?.(errorMsg, 'error');
-      await callSignalingService.updateCallStatus(callToAccept.id, 'failed');
-      setActiveCall(null);
-      setMeetingCredentials(null);
+      if (!wasCancelled) addToast?.(message, 'error');
+      await webRtcCallService.endCall(callId);
+      setLocalStream(null);
+      setRemoteStream(null);
+      setActiveCall((previous) => previous?.id === callId ? null : previous);
     }
-  }, [incomingCall, currentUser, clearCallTimeout, addToast]);
+  }, [currentUser, addToast, peerCallbacks, clearCallTimeout, recordCallHistory]);
 
-  /**
-   * Reject an incoming call
-   */
-  const rejectCall = useCallback(async () => {
-    if (!incomingCall) return;
-
+  const acceptCall = useCallback(async () => {
+    if (!incomingCall || !currentUser || currentUser.isAnonymous) return;
     clearCallTimeout();
     callNotificationService.stopIncomingRingtone();
-
-    const callToReject = incomingCall;
+    const call = incomingCall;
     setIncomingCall(null);
+    setActiveCall({ ...call, status: 'connecting' });
 
-    await callSignalingService.updateCallStatus(callToReject.id, 'rejected', {
-      endedReason: 'declined',
-      recipient: callToReject.caller
-    });
+    try {
+      const streams = await webRtcCallService.acceptIncomingCall(call, peerCallbacks(call.id));
+      setLocalStream(streams.localStream);
+      setRemoteStream(streams.remoteStream);
+    } catch (error) {
+      const wasCancelled = webRtcCallService.wasCallCancelled(call.id);
+      const message = error instanceof Error ? error.message : 'Failed to join WebRTC call';
+      if (!wasCancelled) console.error('[useCalling] Accept WebRTC call failed:', error);
+      callNotificationService.playCallEnded();
+      if (!wasCancelled) {
+        addToast?.(message, 'error');
+        await callSignalingService.updateCallStatus(call.id, 'failed', { endedReason: 'network_error' });
+      }
+      await webRtcCallService.endCall(call.id);
+      setLocalStream(null);
+      setRemoteStream(null);
+      setActiveCall((previous) => previous?.id === call.id ? null : previous);
+    }
+  }, [incomingCall, currentUser, clearCallTimeout, peerCallbacks, addToast]);
 
-    recordCallHistory(callToReject, 'rejected', 0);
+  const rejectCall = useCallback(async () => {
+    if (!incomingCall) return;
+    clearCallTimeout();
+    callNotificationService.stopIncomingRingtone();
+    const call = incomingCall;
+    setIncomingCall(null);
+    await callSignalingService.updateCallStatus(call.id, 'rejected', { endedReason: 'declined' });
+    recordCallHistory(call, 'rejected', 0);
   }, [incomingCall, clearCallTimeout, recordCallHistory]);
 
-  /**
-   * End an ongoing call
-   */
   const endCall = useCallback(async () => {
-    const current = activeCallRef.current;
-    if (!current) return;
-
+    const call = activeCallRef.current;
+    if (!call) return;
     clearCallTimeout();
     callNotificationService.stopOutgoingRingback();
     callNotificationService.stopIncomingRingtone();
@@ -358,31 +306,29 @@ export function useCalling(
     const duration = callStartTimeRef.current
       ? Math.max(0, Math.floor((Date.now() - callStartTimeRef.current) / 1000))
       : 0;
-
+    callStartTimeRef.current = null;
     setActiveCall(null);
-    setMeetingCredentials(null);
+    setLocalStream(null);
+    setRemoteStream(null);
+    await webRtcCallService.endCall(call.id);
 
-    try {
-      await callSignalingService.updateCallStatus(current.id, 'ended', {
-        endedReason: 'completed',
-        endedAt: Date.now(),
-        recipient: current.caller.uid === currentUser?.uid ? current.recipient : current.caller
-      });
+    await callSignalingService.updateCallStatus(call.id, 'ended', {
+      endedReason: duration > 0 ? 'completed' : 'canceled',
+      endedAt: Date.now()
+    });
+    recordCallHistory(call, duration > 0 ? 'completed' : 'canceled', duration);
+  }, [clearCallTimeout, recordCallHistory]);
 
-      if (current.meetingId) {
-        await callApiService.endMeeting(current.meetingId, current.id);
-      }
-
-      recordCallHistory(current, 'completed', duration);
-    } catch (err) {
-      console.warn('[useCalling] Error ending call:', err);
-    }
-  }, [currentUser?.uid, clearCallTimeout, recordCallHistory]);
+  useEffect(() => () => {
+    const call = activeCallRef.current;
+    if (call) void webRtcCallService.endCall(call.id);
+  }, []);
 
   return {
     activeCall,
     incomingCall,
-    meetingCredentials,
+    localStream,
+    remoteStream,
     callHistory,
     isRinging: activeCall?.status === 'ringing',
     isConnected: activeCall?.status === 'connected',

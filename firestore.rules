@@ -309,14 +309,56 @@ service cloud.firestore {
         && resource.data.createdBy == request.auth.uid;
     }
 
-    // Call Signaling for Voice & Video calls
+    function isCallParticipant(callId) {
+      let callPath = /databases/$(database)/documents/calls/$(callId);
+      return isFullMember()
+        && exists(callPath)
+        && (get(callPath).data.caller.uid == request.auth.uid
+          || get(callPath).data.recipient.uid == request.auth.uid);
+    }
+
+    function isCallCaller(callId) {
+      let callPath = /databases/$(database)/documents/calls/$(callId);
+      return isFullMember()
+        && exists(callPath)
+        && get(callPath).data.caller.uid == request.auth.uid;
+    }
+
+    function isCallRecipient(callId) {
+      let callPath = /databases/$(database)/documents/calls/$(callId);
+      return isFullMember()
+        && exists(callPath)
+        && get(callPath).data.recipient.uid == request.auth.uid;
+    }
+
+    function isValidCallDescription(description, expectedType) {
+      return description is map
+        && description.keys().hasOnly(['type', 'sdp'])
+        && description.type == expectedType
+        && description.sdp is string
+        && description.sdp.size() > 0
+        && description.sdp.size() <= 100000;
+    }
+
+    function isValidIceCandidate(candidate) {
+      return candidate is map
+        && candidate.keys().hasOnly(['candidate', 'sdpMid', 'sdpMLineIndex', 'usernameFragment'])
+        && candidate.candidate is string
+        && candidate.candidate.size() <= 4096
+        && (!hasField(candidate, 'sdpMid') || candidate.sdpMid == null || candidate.sdpMid is string)
+        && (!hasField(candidate, 'sdpMLineIndex') || candidate.sdpMLineIndex == null || candidate.sdpMLineIndex is int)
+        && (!hasField(candidate, 'usernameFragment') || candidate.usernameFragment == null || candidate.usernameFragment is string);
+    }
+
+    // WebRTC call setup: Firestore carries SDP and ICE signaling only.
     match /calls/{callId} {
       allow read: if isFullMember()
-        && (resource.data.caller.uid == request.auth.uid || resource.data.recipient.uid == request.auth.uid);
+        && (resource.data.caller.uid == request.auth.uid
+          || resource.data.recipient.uid == request.auth.uid);
       allow create: if isFullMember()
         && request.resource.data.keys().hasOnly([
           'id', 'conversationId', 'caller', 'recipient', 'callType', 'status',
-          'meetingId', 'createdAt', 'answeredAt', 'endedAt', 'endedReason'
+          'createdAt', 'offer'
         ])
         && request.resource.data.id == callId
         && request.resource.data.caller is map
@@ -325,23 +367,48 @@ service cloud.firestore {
         && request.resource.data.recipient.uid is string
         && request.resource.data.recipient.uid != request.auth.uid
         && request.resource.data.callType in ['voice', 'video']
-        && request.resource.data.status in ['ringing', 'initiating']
-        && request.resource.data.createdAt is int;
-      allow update: if isAuthenticated()
-        && (resource.data.caller.uid == request.auth.uid || resource.data.recipient.uid == request.auth.uid)
+        && request.resource.data.status == 'ringing'
+        && request.resource.data.createdAt is int
+        && isValidCallDescription(request.resource.data.offer, 'offer');
+      allow update: if isCallParticipant(callId)
         && request.resource.data.caller == resource.data.caller
         && request.resource.data.recipient == resource.data.recipient
         && request.resource.data.id == resource.data.id
         && request.resource.data.callType == resource.data.callType
         && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.offer == resource.data.offer
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'status', 'meetingId', 'answeredAt', 'endedAt', 'endedReason'
+          'status', 'answer', 'answeredAt', 'endedAt', 'endedReason', 'screenShareBy'
         ])
-        && request.resource.data.status in [
-          'ringing', 'initiating', 'accepted', 'rejected', 'busy', 'missed', 'ended', 'failed'
-        ];
-      allow delete: if isAuthenticated()
-        && (resource.data.caller.uid == request.auth.uid || resource.data.recipient.uid == request.auth.uid);
+        && (
+          (isCallRecipient(callId)
+            && resource.data.status == 'ringing'
+            && request.resource.data.status == 'accepted'
+            && isValidCallDescription(request.resource.data.answer, 'answer')
+            && request.resource.data.answeredAt is int)
+          || (isCallRecipient(callId)
+            && request.resource.data.status in ['rejected', 'busy'])
+          || (request.resource.data.status in ['missed', 'ended', 'failed'])
+          || (request.resource.data.status == resource.data.status
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['screenShareBy'])
+            && (request.resource.data.screenShareBy == null
+              || request.resource.data.screenShareBy == request.auth.uid))
+        );
+      allow delete: if isCallParticipant(callId);
+
+      match /callerCandidates/{candidateId} {
+        allow read: if isCallParticipant(callId);
+        allow create: if isCallCaller(callId) && isValidIceCandidate(request.resource.data);
+        allow update: if false;
+        allow delete: if isCallCaller(callId);
+      }
+
+      match /calleeCandidates/{candidateId} {
+        allow read: if isCallParticipant(callId);
+        allow create: if isCallRecipient(callId) && isValidIceCandidate(request.resource.data);
+        allow update: if false;
+        allow delete: if isCallRecipient(callId);
+      }
     }
 
     // Call History (stored per user in their private collection)

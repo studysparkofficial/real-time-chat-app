@@ -6,23 +6,25 @@ import {
   Minimize2,
   Maximize2
 } from 'lucide-react';
-import { CallSession, ChimeMeetingCredentials } from '../../types/chat.types';
-import { useChimeMeeting } from '../../hooks/useChimeMeeting';
+import { CallSession } from '../../types/chat.types';
+import { useWebRtcMeeting } from '../../hooks/useWebRtcMeeting';
 import { Avatar } from '../common/Avatar';
 import { VoiceCallControls } from './VoiceCallControls';
 import { VideoCallControls } from './VideoCallControls';
 
 interface CallWindowProps {
   activeCall: CallSession;
-  credentials: ChimeMeetingCredentials | null;
   currentUserId: string;
+  localStream: MediaStream | null;
+  remoteStream: MediaStream | null;
   onEndCall: () => void;
 }
 
 export const CallWindow: React.FC<CallWindowProps> = ({
   activeCall,
-  credentials,
   currentUserId,
+  localStream,
+  remoteStream,
   onEndCall
 }) => {
   const isVideo = activeCall.callType === 'video';
@@ -50,11 +52,14 @@ export const CallWindow: React.FC<CallWindowProps> = ({
     toggleVideo,
     toggleScreenShare,
     switchCamera
-  } = useChimeMeeting({
-    credentials,
+  } = useWebRtcMeeting({
+    callId: activeCall.id,
     callType: activeCall.callType,
+    currentUserId,
+    localStream,
+    remoteStream,
     isConnected: activeCall.status === 'connected',
-    onCallEnded: onEndCall
+    remoteScreenSharing: Boolean(activeCall.screenShareBy && activeCall.screenShareBy !== currentUserId)
   });
 
   const toggleFullscreen = () => {
@@ -81,7 +86,15 @@ export const CallWindow: React.FC<CallWindowProps> = ({
     if (availableCameras.length <= 1) return;
     const currentIndex = availableCameras.findIndex((c) => c.deviceId === activeCameraId);
     const nextIndex = (currentIndex + 1) % availableCameras.length;
-    void switchCamera(availableCameras[nextIndex].deviceId);
+    void switchCamera(availableCameras[nextIndex].deviceId).catch((error) => {
+      console.warn('[CallWindow] Camera switch failed:', error);
+    });
+  };
+
+  const handleToggleScreenShare = () => {
+    void toggleScreenShare().catch((error) => {
+      console.warn('[CallWindow] Screen sharing could not start:', error);
+    });
   };
 
   return (
@@ -101,7 +114,7 @@ export const CallWindow: React.FC<CallWindowProps> = ({
         userSelect: 'none'
       }}
     >
-      {/* Hidden audio element for receiving remote participant speech */}
+      {/* Video elements are muted so remote speech plays only once through audio. */}
       <audio ref={setAudioElement} autoPlay playsInline />
 
       {/* Top Bar: Peer Name, Call Timer, Connection Quality Pill */}
@@ -170,7 +183,7 @@ export const CallWindow: React.FC<CallWindowProps> = ({
               }}
             >
               {connectionQuality === 'good'
-                ? 'HD Encrypted'
+                ? 'Encrypted'
                 : connectionQuality === 'poor'
                 ? 'Unstable Network'
                 : 'Reconnecting...'}
@@ -227,6 +240,7 @@ export const CallWindow: React.FC<CallWindowProps> = ({
               ref={setScreenShareElement}
               autoPlay
               playsInline
+              muted
               style={{
                 width: '100%',
                 height: '100%',
@@ -242,6 +256,7 @@ export const CallWindow: React.FC<CallWindowProps> = ({
             ref={setRemoteVideoElement}
             autoPlay
             playsInline
+            muted
             style={{
               width: '100%',
               height: '100%',
@@ -294,7 +309,7 @@ export const CallWindow: React.FC<CallWindowProps> = ({
               {peer.displayName}
             </h2>
             <p style={{ fontSize: '13.5px', color: 'rgba(255, 255, 255, 0.6)', margin: 0 }}>
-              {isVideo ? 'Camera is off' : 'Connected · End-to-End Audio'}
+              {isVideo ? 'Camera is off' : 'Connected · Voice call'}
             </p>
           </div>
         )}
@@ -354,7 +369,7 @@ export const CallWindow: React.FC<CallWindowProps> = ({
             hasMultipleCameras={availableCameras.length > 1}
             onToggleMute={toggleMute}
             onToggleVideo={toggleVideo}
-            onToggleScreenShare={toggleScreenShare}
+            onToggleScreenShare={handleToggleScreenShare}
             onToggleFullscreen={toggleFullscreen}
             onSwitchCamera={handleSwitchCamera}
             onEndCall={onEndCall}

@@ -170,6 +170,11 @@ export interface CallParticipant {
   photoURL?: string | null;
 }
 
+export interface WebRtcSessionDescription {
+  type: 'offer' | 'answer';
+  sdp: string;
+}
+
 export interface CallSession {
   id: string; // callId
   conversationId?: string;
@@ -177,7 +182,9 @@ export interface CallSession {
   recipient: CallParticipant;
   callType: CallType;
   status: CallStatus;
-  meetingId?: string;
+  offer?: WebRtcSessionDescription;
+  answer?: WebRtcSessionDescription;
+  screenShareBy?: string | null;
   createdAt: number;
   answeredAt?: number;
   endedAt?: number;
