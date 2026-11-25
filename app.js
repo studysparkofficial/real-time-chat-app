@@ -26,6 +26,7 @@ import {
   listenToCustomRooms
 } from "./firebase-config.js";
 import {
+  compressImageIfNeeded,
   getAttachmentCategory,
   getSecureDownloadUrl,
   clearSecureDownloadUrlCache,
@@ -1620,6 +1621,111 @@ el.fileAttachmentInput.addEventListener('change', (e) => {
   stageFileAttachment(file);
 });
 
+async function performAttachmentUpload(attachment, user, signal = null) {
+  const isActive = () => state.stagedAttachment === attachment;
+
+  if (attachment.category === 'image' && !attachment.compressed) {
+    if (isActive()) {
+      el.stagedProgressContainer.classList.remove('hidden');
+      el.stagedProgressText.textContent = 'Optimizing image…';
+    }
+    const originalSize = attachment.file.size;
+    const optimizedFile = await compressImageIfNeeded(attachment.file);
+    if (signal?.aborted) throw new Error('Upload was cancelled.');
+
+    attachment.compressed = true;
+    if (optimizedFile !== attachment.file) {
+      attachment.file = optimizedFile;
+      attachment.name = optimizedFile.name;
+      attachment.mimeType = optimizedFile.type;
+      attachment.type = optimizedFile.type;
+      attachment.size = optimizedFile.size;
+      if (isActive()) {
+        el.stagedFileName.textContent = optimizedFile.name;
+        el.stagedFileSize.textContent = `${formatAttachmentBytes(optimizedFile.size)} (from ${formatAttachmentBytes(originalSize)})`;
+      }
+    }
+  }
+
+  if (isActive()) {
+    el.stagedProgressContainer.classList.remove('hidden');
+    el.stagedProgressText.textContent = 'Getting a secure S3 upload link…';
+  }
+
+  const idToken = await user.getIdToken();
+  if (signal?.aborted) throw new Error('Upload was cancelled.');
+
+  const authorization = await requestUploadAuthorization(attachment.file, idToken, signal);
+  if (signal?.aborted) throw new Error('Upload was cancelled.');
+
+  if (isActive()) {
+    el.stagedProgressText.textContent = 'Uploading to S3…';
+  }
+
+  const uploaded = await uploadFileToS3(
+    authorization,
+    attachment.file,
+    (percent, loaded, total) => {
+      if (!isActive()) return;
+      el.stagedProgressBar.style.width = `${percent}%`;
+      el.stagedProgressText.textContent = `Uploading ${percent}% · ${formatAttachmentBytes(loaded)} / ${formatAttachmentBytes(total)}`;
+    },
+    attachment.mimeType,
+    signal
+  );
+
+  if (uploaded.downloadUrl) {
+    seedDownloadUrl(user.uid, uploaded.key, uploaded.downloadUrl, 3600);
+  } else if (attachment.previewUrl) {
+    seedDownloadUrl(user.uid, uploaded.key, attachment.previewUrl, 7200);
+  }
+
+  const storedAttachment = {
+    key: uploaded.key,
+    name: uploaded.name,
+    mimeType: attachment.mimeType,
+    type: attachment.mimeType,
+    category: attachment.category,
+    size: uploaded.size,
+    previewUrl: attachment.previewUrl || uploaded.downloadUrl || null
+  };
+  attachment.uploadedAttachment = storedAttachment;
+  return storedAttachment;
+}
+
+function startBackgroundAttachmentUpload(attachment) {
+  const user = auth.currentUser;
+  if (!user) return;
+
+  const controller = new AbortController();
+  attachment.abortController = controller;
+
+  attachment.uploadPromise = performAttachmentUpload(attachment, user, controller.signal)
+    .then((stored) => {
+      if (state.stagedAttachment === attachment) {
+        el.stagedProgressContainer.classList.remove('hidden');
+        el.stagedProgressBar.style.width = '100%';
+        el.stagedProgressText.textContent = 'Uploaded & ready to send';
+      }
+      return stored;
+    })
+    .catch((err) => {
+      if (controller.signal.aborted || err?.name === 'AbortError') return null;
+      console.warn('Background upload paused, will retry on send:', err?.message || err);
+      if (state.stagedAttachment === attachment) {
+        el.stagedProgressBar.style.width = '0%';
+        el.stagedProgressText.textContent = 'Ready to upload on send';
+      }
+      return null;
+    })
+    .finally(() => {
+      if (attachment.abortController === controller) {
+        attachment.abortController = null;
+      }
+      attachment.uploadPromise = null;
+    });
+}
+
 function stageFileAttachment(file) {
   const validation = validateAttachmentFile(file);
   if (!validation.valid) {
@@ -1630,15 +1736,20 @@ function stageFileAttachment(file) {
 
   clearStagedAttachment();
   const previewUrl = URL.createObjectURL(file);
-  state.stagedAttachment = {
+  const staged = {
     file,
     name: file.name,
     type: validation.mimeType,
     mimeType: validation.mimeType,
     category: validation.category,
     size: file.size,
-    previewUrl
+    previewUrl,
+    compressed: false,
+    uploadedAttachment: null,
+    uploadPromise: null,
+    abortController: null
   };
+  state.stagedAttachment = staged;
 
   el.stagedFileName.textContent = file.name;
   el.stagedFileSize.textContent = formatAttachmentBytes(file.size);
@@ -1661,9 +1772,13 @@ function stageFileAttachment(file) {
   }
 
   el.stagedAttachmentBanner.classList.remove('hidden');
+  startBackgroundAttachmentUpload(staged);
 }
 
 function clearStagedAttachment(revokeUrl = true) {
+  if (state.stagedAttachment?.abortController) {
+    state.stagedAttachment.abortController.abort();
+  }
   if (revokeUrl && state.stagedAttachment?.previewUrl) {
     URL.revokeObjectURL(state.stagedAttachment.previewUrl);
   }
@@ -1913,38 +2028,17 @@ async function sendMessage() {
     let storedAttachment = null;
     if (attachment) {
       el.stagedProgressContainer.classList.remove('hidden');
-      el.stagedProgressText.textContent = 'Getting a secure S3 upload link…';
 
       if (attachment.uploadedAttachment) {
         storedAttachment = attachment.uploadedAttachment;
       } else {
         const user = auth.currentUser;
         if (!user) throw new Error('Sign in with Google, email, or an authenticated guest account to upload media.');
-        const idToken = await user.getIdToken();
-        const authorization = await requestUploadAuthorization(attachment.file, idToken);
 
-        el.stagedProgressText.textContent = 'Uploading to S3…';
-        const uploaded = await uploadFileToS3(authorization, attachment.file, (percent, loaded, total) => {
-          el.stagedProgressBar.style.width = `${percent}%`;
-          el.stagedProgressText.textContent = `Uploading ${percent}% · ${formatAttachmentBytes(loaded)} / ${formatAttachmentBytes(total)}`;
-        }, attachment.mimeType);
-
-        if (uploaded.downloadUrl) {
-          seedDownloadUrl(user.uid, uploaded.key, uploaded.downloadUrl, 3600);
-        } else if (attachment.previewUrl) {
-          seedDownloadUrl(user.uid, uploaded.key, attachment.previewUrl, 7200);
+        if (attachment.uploadPromise) {
+          await attachment.uploadPromise;
         }
-
-        storedAttachment = {
-          key: uploaded.key,
-          name: uploaded.name,
-          mimeType: attachment.mimeType,
-          type: attachment.mimeType,
-          category: attachment.category,
-          size: uploaded.size,
-          previewUrl: attachment.previewUrl || uploaded.downloadUrl || null
-        };
-        attachment.uploadedAttachment = storedAttachment;
+        storedAttachment = attachment.uploadedAttachment || await performAttachmentUpload(attachment, user);
       }
     }
 

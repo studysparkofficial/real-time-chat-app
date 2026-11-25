@@ -37,6 +37,78 @@ export function seedDownloadUrl(userId, key, url, ttlSeconds = 3600) {
 }
 
 /**
+ * Resize and compress JPEG/PNG/WebP images client-side before uploading to S3.
+ * Returns the original file unchanged if it is not a compressible image, is already small,
+ * or if compression does not reduce file size.
+ */
+export async function compressImageIfNeeded(
+  file,
+  { maxDimension = 1920, quality = 0.82, minBytesToCompress = 150 * 1024 } = {}
+) {
+  if (!file || typeof document === 'undefined') return file;
+  const mimeType = (file.type || '').toLowerCase();
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) {
+    return file;
+  }
+  if (file.size <= minBytesToCompress) {
+    return file;
+  }
+
+  let objectUrl = null;
+  try {
+    objectUrl = URL.createObjectURL(file);
+    const img = await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => reject(new Error('Image decode failed'));
+      image.src = objectUrl;
+    });
+
+    const width = img.naturalWidth || img.width;
+    const height = img.naturalHeight || img.height;
+    if (!width || !height) return file;
+
+    const scale = Math.min(1, maxDimension / Math.max(width, height));
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+    const canvasToBlob = (type, q) =>
+      new Promise((resolve) => canvas.toBlob(resolve, type, q));
+
+    // Prefer WebP for best compression (and alpha support); fall back to JPEG if unsupported
+    let outputType = 'image/webp';
+    let blob = await canvasToBlob(outputType, quality);
+    if (!blob || blob.type !== 'image/webp') {
+      outputType = 'image/jpeg';
+      blob = await canvasToBlob(outputType, quality);
+    }
+
+    if (!blob || blob.size >= file.size) {
+      return file;
+    }
+
+    const ext = outputType === 'image/webp' ? 'webp' : 'jpg';
+    const baseName = (file.name || 'image').replace(/\.[^/.]+$/, '');
+    return new File([blob], `${baseName}.${ext}`, {
+      type: outputType,
+      lastModified: file.lastModified || Date.now()
+    });
+  } catch {
+    return file;
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+  }
+}
+
+/**
  * Format bytes to human readable string (KB, MB)
  */
 export function formatBytes(bytes, decimals = 1) {
@@ -113,7 +185,7 @@ export function validateAttachmentFile(file) {
 /**
  * Request an S3 upload authorization (presigned PUT or presigned POST)
  */
-export async function requestUploadAuthorization(file, idToken) {
+export async function requestUploadAuthorization(file, idToken, signal = null) {
   if (!idToken) {
     throw new Error('Authentication required. Please sign in first.');
   }
@@ -133,6 +205,7 @@ export async function requestUploadAuthorization(file, idToken) {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${idToken}`
       },
+      ...(signal ? { signal } : {}),
       body: JSON.stringify({
         fileName: file.name,
         contentType: validation.mimeType,
@@ -170,9 +243,27 @@ export async function requestUploadAuthorization(file, idToken) {
  * Upload file directly to S3 with live progress callbacks
  * Supports Presigned POST (strict size enforcement) or Presigned PUT
  */
-export function uploadFileToS3(uploadData, file, onProgress, contentType = file.type || 'application/octet-stream') {
+export function uploadFileToS3(
+  uploadData,
+  file,
+  onProgress,
+  contentType = file.type || 'application/octet-stream',
+  signal = null
+) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Upload was cancelled.'));
+      return;
+    }
+
     const xhr = new XMLHttpRequest();
+    const onAbort = () => xhr.abort();
+    if (signal) {
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
+    const cleanup = () => {
+      if (signal) signal.removeEventListener('abort', onAbort);
+    };
 
     xhr.upload.addEventListener('progress', (e) => {
       if (e.lengthComputable) {
@@ -182,6 +273,7 @@ export function uploadFileToS3(uploadData, file, onProgress, contentType = file.
     });
 
     xhr.addEventListener('load', () => {
+      cleanup();
       if (xhr.status >= 200 && xhr.status < 300) {
         if (uploadData.downloadUrl) {
           seedDownloadUrl(null, uploadData.key, uploadData.downloadUrl, uploadData.expiresIn || 3600);
@@ -204,10 +296,12 @@ export function uploadFileToS3(uploadData, file, onProgress, contentType = file.
     });
 
     xhr.addEventListener('error', () => {
+      cleanup();
       reject(new Error('Network error during upload to S3. Check connection and S3 CORS settings.'));
     });
 
     xhr.addEventListener('abort', () => {
+      cleanup();
       reject(new Error('Upload was cancelled.'));
     });
 
