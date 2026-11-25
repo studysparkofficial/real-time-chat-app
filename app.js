@@ -1312,7 +1312,12 @@ function appendMessageToUI(msg) {
 async function hydrateMessageAttachment(container, msg) {
   const attachment = msg.attachment;
   try {
-    let url = attachment.previewUrl || attachment.data || null;
+    const rawUrl = attachment.previewUrl || attachment.data || null;
+    const isStaleOrLocalUrl = typeof rawUrl === 'string' && (
+      rawUrl.startsWith('blob:') ||
+      rawUrl.includes('X-Amz-Signature=')
+    );
+    let url = (attachment.key && isStaleOrLocalUrl) ? null : rawUrl;
     if (!url && attachment.key) {
       const user = auth.currentUser;
       if (!user) throw new Error('Sign in to view this attachment.');
@@ -1676,8 +1681,6 @@ async function performAttachmentUpload(attachment, user, signal = null) {
 
   if (uploaded.downloadUrl) {
     seedDownloadUrl(user.uid, uploaded.key, uploaded.downloadUrl, 3600);
-  } else if (attachment.previewUrl) {
-    seedDownloadUrl(user.uid, uploaded.key, attachment.previewUrl, 7200);
   }
 
   const storedAttachment = {
@@ -1686,8 +1689,7 @@ async function performAttachmentUpload(attachment, user, signal = null) {
     mimeType: attachment.mimeType,
     type: attachment.mimeType,
     category: attachment.category,
-    size: uploaded.size,
-    previewUrl: attachment.previewUrl || uploaded.downloadUrl || null
+    size: uploaded.size
   };
   attachment.uploadedAttachment = storedAttachment;
   return storedAttachment;
