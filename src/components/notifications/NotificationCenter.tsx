@@ -143,7 +143,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = (props) => 
         onClick={() => setOpen((value) => !value)}
         title="Notifications"
       >
-        <Bell size={20} />
+        <Bell size={22} />
         {unreadCount > 0 && <span className="notification-count-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 

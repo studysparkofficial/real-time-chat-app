@@ -175,6 +175,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
       {/* Quick Emoji Tray Popover */}
       {showEmojiTray && (
         <div
+          className="emoji-tray-popover"
           style={{
             margin: '0 16px 8px 16px',
             padding: '10px 16px',
@@ -212,6 +213,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
       {/* Reply Banner Above Input */}
       {replyTo && (
         <div
+          className="reply-banner-bar"
           style={{
             margin: '0 16px 8px 16px',
             padding: '10px 14px',
@@ -262,6 +264,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
       {/* Staged File / Photo Preview Banner */}
       {stagedFile && (
         <div
+          className="staged-file-banner"
           style={{
             margin: '0 16px 10px 16px',
             padding: '10px 14px',
@@ -335,6 +338,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
       {/* Upload Error Banner */}
       {uploadError && (
         <div
+          className="upload-error-banner"
           style={{
             margin: '0 16px 8px 16px',
             padding: '8px 14px',
@@ -421,6 +425,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
               onClick={() => setShowEmojiTray(!showEmojiTray)}
               className="pill-icon-btn"
               title="Emoji"
+              aria-label="Insert Emoji"
             >
               <Smile size={23} />
             </button>
@@ -445,6 +450,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
               onClick={() => fileInputRef.current?.click()}
               className="pill-icon-btn"
               title="Send Photo, Video or PDF"
+              aria-label="Send Photo, Video or PDF"
             >
               <Paperclip size={23} />
             </button>
@@ -453,8 +459,9 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
             <button
               type="button"
               onClick={handleCodeBlock}
-              className="pill-icon-btn"
+              className="pill-icon-btn pill-btn-code"
               title="Insert Code Snippet"
+              aria-label="Insert Code Snippet"
             >
               <Code size={22} />
             </button>
@@ -484,6 +491,7 @@ export const ChatInputBar: React.FC<ChatInputBarProps> = ({
                 onClick={onStartRecording}
                 className="pill-icon-btn"
                 title="Record Voice Note"
+                aria-label="Record Voice Note"
               >
                 <Mic size={23} />
               </button>

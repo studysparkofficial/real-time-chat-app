@@ -376,7 +376,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       {/* Bubble Container */}
       <div
         className={`message-bubble ${isOutgoing ? 'outgoing' : 'incoming'}`}
-        onClick={handleBubbleClick}
+        onClick={(e) => {
+          handleBubbleClick(e);
+          if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+            setShowToolbar((prev) => !prev);
+          }
+        }}
       >
         {/* Reply Quote Banner */}
         {message.replyTo && (
@@ -504,14 +509,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   background: 'rgba(0,0,0,0.3)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '12px'
+                  gap: '12px',
+                  maxWidth: '100%'
                 }}
               >
                 <audio
                   src={mediaUrl}
                   controls
                   onError={handleMediaError}
-                  style={{ height: '40px', maxWidth: '260px' }}
+                  style={{ height: '40px', width: '100%', maxWidth: '260px' }}
                 />
               </div>
             )}
@@ -725,6 +731,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       {/* Floating Hover Action Toolbar */}
       {showToolbar && message.status !== 'failed' && (
         <div
+          className="message-toolbar"
           style={{
             position: 'absolute',
             top: '-24px',
@@ -744,6 +751,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           <button
             type="button"
             onClick={() => setShowReactionPicker(!showReactionPicker)}
+            className="message-toolbar-btn"
             style={{
               background: 'transparent',
               border: 'none',
@@ -755,6 +763,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               alignItems: 'center'
             }}
             title="Add Reaction"
+            aria-label="Add Reaction"
           >
             <Smile size={18} />
           </button>
@@ -763,6 +772,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <button
               type="button"
               onClick={() => onReply(message)}
+              className="message-toolbar-btn"
               style={{
                 background: 'transparent',
                 border: 'none',
@@ -774,6 +784,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 alignItems: 'center'
               }}
               title="Reply"
+              aria-label="Reply to message"
             >
               <Reply size={18} />
             </button>
@@ -804,6 +815,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       {/* Quick Reaction Emoji Picker Popover */}
       {showReactionPicker && (
         <div
+          className="message-reaction-picker"
           style={{
             position: 'absolute',
             top: '-58px',

@@ -24,7 +24,9 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
         }}
       >
         <button
+          type="button"
           onClick={onOpenAuthModal}
+          aria-label="Sign In to JNUverse"
           style={{
             width: '100%',
             display: 'flex',
@@ -43,7 +45,7 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
             boxShadow: 'var(--shadow-sm)'
           }}
         >
-          <LogIn size={20} /> Sign In to JNUverse
+          <LogIn size={22} /> Sign In to JNUverse
         </button>
       </div>
     );
@@ -57,11 +59,15 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        background: 'rgba(0, 0, 0, 0.15)'
+        background: 'rgba(0, 0, 0, 0.15)',
+        minHeight: '64px'
       }}
     >
       <div
         onClick={onOpenAccountModal}
+        role="button"
+        tabIndex={0}
+        aria-label="Scholar Profile & Settings"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -69,8 +75,8 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
           cursor: 'pointer',
           flex: 1,
           minWidth: 0,
-          padding: '4px 6px',
-          borderRadius: '10px',
+          padding: '6px 8px',
+          borderRadius: '12px',
           transition: 'background 0.15s ease'
         }}
         onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-card-hover)')}
@@ -86,7 +92,7 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
         <div style={{ minWidth: 0, flex: 1 }}>
           <div
             style={{
-              fontSize: '14.5px',
+              fontSize: '15px',
               fontWeight: 700,
               color: 'var(--text-primary)',
               whiteSpace: 'nowrap',
@@ -98,7 +104,7 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
           </div>
           <div
             style={{
-              fontSize: '12px',
+              fontSize: '13px',
               color: 'var(--text-muted)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
@@ -111,7 +117,9 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
       </div>
 
       <button
+        type="button"
         onClick={onOpenAccountModal}
+        aria-label="Account & Profile Settings"
         style={{
           background: 'transparent',
           border: 'none',
@@ -119,10 +127,12 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
           cursor: 'pointer',
           minWidth: '44px',
           minHeight: '44px',
+          width: '44px',
+          height: '44px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          borderRadius: '10px',
+          borderRadius: '12px',
           transition: 'all 0.15s ease'
         }}
         onMouseEnter={(e) => {
@@ -135,7 +145,7 @@ export const UserProfileBar: React.FC<UserProfileBarProps> = ({
         }}
         title="Settings"
       >
-        <Settings size={20} />
+        <Settings size={22} />
       </button>
     </div>
   );

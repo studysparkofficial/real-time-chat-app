@@ -137,7 +137,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onJumpMessageComplete
 }) => {
   const handleToggleSidebar = () => {
-    if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
       setIsSidebarOpenMobile(!isSidebarOpenMobile);
     } else {
       setIsDesktopSidebarOpen(!isDesktopSidebarOpen);
@@ -145,9 +145,22 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   };
 
   const handleCloseSidebar = () => {
-    setIsSidebarOpenMobile(false);
-    setIsDesktopSidebarOpen(false);
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setIsSidebarOpenMobile(false);
+    } else {
+      setIsDesktopSidebarOpen(false);
+    }
   };
+
+  React.useEffect(() => {
+    const handleResize = () => {
+      if (typeof window !== 'undefined' && window.innerWidth >= 768 && isSidebarOpenMobile) {
+        setIsSidebarOpenMobile(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [isSidebarOpenMobile, setIsSidebarOpenMobile]);
 
   return (
     <div className="pulse-app">

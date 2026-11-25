@@ -1,5 +1,5 @@
 import React from 'react';
-import { MoreVertical, Hash, Moon, Sun, Users, Phone, Video, Clock } from 'lucide-react';
+import { Menu, Hash, Moon, Sun, Users, Phone, Video, Clock } from 'lucide-react';
 import { ChatRoom, ChatUser } from '../../types/chat.types';
 import { Avatar } from '../common/Avatar';
 
@@ -38,23 +38,24 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="chat-header">
-      {/* Left: 3-Dots Drawer Toggle + JNU Emblem + Channel Info */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-        {/* Dedicated 3-Dots Button (⋮) to toggle left sidebar */}
+      {/* Left: Hamburger Drawer Toggle + JNU Emblem + Channel Info */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+        {/* Hamburger Menu Button (☰) to toggle left navigation drawer */}
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="header-action-btn"
-          aria-label="Toggle Channels Menu"
-          title="Toggle Channels Menu (⋮)"
+          className="header-action-btn header-btn-menu"
+          aria-label="Toggle navigation drawer"
+          title="Toggle Channels Menu (☰)"
         >
-          <MoreVertical size={24} />
+          <Menu size={24} />
         </button>
 
-        {/* JNU Official Logo Thumbnail */}
+        {/* JNU Official Logo Thumbnail (hidden on narrow mobile to keep title readable) */}
         <img
           src="/jnu-logo.png"
           alt="JNU"
+          className="header-jnu-logo"
           onClick={onToggleSidebar}
           style={{
             width: '38px',
@@ -95,7 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
               : isEmoji ? currentRoom.icon : <Hash size={20} />}
           </div>
 
-          <div style={{ minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div
               style={{
                 display: 'flex',
@@ -159,17 +160,18 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Right Action Icons: Calling, Channel Info, Call History, Theme Toggle, Profile */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div className="chat-header-right">
         {notificationCenter}
         {directUser && onStartVoiceCall && (
           <button
             type="button"
             onClick={() => onStartVoiceCall(directUser)}
-            className="header-action-btn"
+            className="header-action-btn header-btn-voice"
             title={`Start Voice Call with ${directUser.displayName}`}
+            aria-label={`Start Voice Call with ${directUser.displayName}`}
             style={{ color: '#10b981' }}
           >
-            <Phone size={20} />
+            <Phone size={22} />
           </button>
         )}
 
@@ -177,11 +179,12 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={() => onStartVideoCall(directUser)}
-            className="header-action-btn"
+            className="header-action-btn header-btn-video"
             title={`Start Video Call with ${directUser.displayName}`}
+            aria-label={`Start Video Call with ${directUser.displayName}`}
             style={{ color: 'var(--accent-primary, #6366f1)' }}
           >
-            <Video size={20} />
+            <Video size={22} />
           </button>
         )}
 
@@ -189,27 +192,32 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onOpenCallHistory}
-            className="header-action-btn"
+            className="header-action-btn header-btn-history"
             title="Recent Call History"
+            aria-label="Recent Call History"
           >
-            <Clock size={20} />
+            <Clock size={22} />
           </button>
         )}
 
-        {!directUser && <button
-          type="button"
-          onClick={onOpenChannelInfo}
-          className="header-action-btn"
-          title="Channel Info & Members"
-        >
-          <Users size={22} />
-        </button>}
+        {!directUser && (
+          <button
+            type="button"
+            onClick={onOpenChannelInfo}
+            className="header-action-btn header-btn-info"
+            title="Channel Info & Members"
+            aria-label="Channel Info and Members"
+          >
+            <Users size={22} />
+          </button>
+        )}
 
         <button
           type="button"
           onClick={onToggleTheme}
-          className="header-action-btn"
+          className="header-action-btn header-btn-theme"
           title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
+          aria-label={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} Mode`}
         >
           {theme === 'dark' ? <Sun size={22} /> : <Moon size={22} />}
         </button>
@@ -218,18 +226,9 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             type="button"
             onClick={onOpenAccountModal}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '2px',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginLeft: '4px'
-            }}
+            className="header-action-btn header-btn-avatar"
             title="Account & Profile Settings"
+            aria-label="Account and Profile Settings"
           >
             <Avatar
               src={currentUser.photoURL}

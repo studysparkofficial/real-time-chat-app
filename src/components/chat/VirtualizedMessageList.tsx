@@ -116,17 +116,17 @@ export const VirtualizedMessageList: React.FC<VirtualizedMessageListProps> = ({
           <Skeleton width={36} height={36} borderRadius="50%" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <Skeleton width={120} height={14} />
-            <Skeleton width={260} height={40} borderRadius={16} />
+            <Skeleton width="min(240px, 60vw)" height={40} borderRadius={16} />
           </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <Skeleton width={200} height={42} borderRadius={16} />
+          <Skeleton width="min(200px, 55vw)" height={42} borderRadius={16} />
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
           <Skeleton width={36} height={36} borderRadius="50%" />
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             <Skeleton width={90} height={14} />
-            <Skeleton width={310} height={56} borderRadius={16} />
+            <Skeleton width="min(260px, 65vw)" height={56} borderRadius={16} />
           </div>
         </div>
       </div>

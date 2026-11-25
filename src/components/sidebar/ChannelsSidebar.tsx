@@ -54,6 +54,26 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
     if (isOpenMobile) onCloseSidebar();
   };
 
+  const handleOpenCreateChannel = () => {
+    if (isOpenMobile) onCloseSidebar();
+    onOpenCreateChannel();
+  };
+
+  const handleOpenNewDM = () => {
+    if (isOpenMobile) onCloseSidebar();
+    onOpenNewDirectMessage();
+  };
+
+  const handleOpenAccount = () => {
+    if (isOpenMobile) onCloseSidebar();
+    onOpenAccountModal();
+  };
+
+  const handleOpenAuth = () => {
+    if (isOpenMobile) onCloseSidebar();
+    onOpenAuthModal();
+  };
+
   return (
     <aside
       className={`sidebar-container ${isOpenMobile ? 'open' : ''} ${
@@ -113,15 +133,19 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {/* New Channel Button */}
           <button
-            onClick={onOpenCreateChannel}
+            type="button"
+            onClick={handleOpenCreateChannel}
             title="Create JNU Channel"
+            aria-label="Create JNU Channel"
             style={{
-              minWidth: '40px',
-              minHeight: '40px',
-              borderRadius: '10px',
+              minWidth: '44px',
+              minHeight: '44px',
+              width: '44px',
+              height: '44px',
+              borderRadius: '12px',
               background: 'var(--bg-card-hover)',
               border: '1px solid var(--border-color)',
               color: 'var(--text-primary)',
@@ -132,17 +156,21 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
               transition: 'all 0.15s ease'
             }}
           >
-            <Plus size={20} />
+            <Plus size={22} />
           </button>
 
           {/* Dedicated Close Button (X) to close sidebar on all screen sizes */}
           <button
+            type="button"
             onClick={onCloseSidebar}
             title="Close Channels Menu"
+            aria-label="Close Channels Menu"
             style={{
-              minWidth: '40px',
-              minHeight: '40px',
-              borderRadius: '10px',
+              minWidth: '44px',
+              minHeight: '44px',
+              width: '44px',
+              height: '44px',
+              borderRadius: '12px',
               background: 'var(--bg-card-hover)',
               border: '1px solid var(--border-color)',
               color: 'var(--text-secondary)',
@@ -153,7 +181,7 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
               transition: 'all 0.15s ease'
             }}
           >
-            <X size={20} />
+            <X size={22} />
           </button>
         </div>
       </div>
@@ -213,30 +241,32 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
               </div>
               <button
                 type="button"
-                onClick={onOpenNewDirectMessage}
+                onClick={handleOpenNewDM}
                 aria-label="New direct message"
-                title="New chat"
+                title="New direct message"
                 style={{
                   display: 'grid',
                   placeItems: 'center',
-                  width: '34px',
-                  height: '34px',
-                  borderRadius: '10px',
+                  minWidth: '44px',
+                  minHeight: '44px',
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '12px',
                   border: '1px solid var(--border-color)',
                   background: 'var(--bg-card-hover)',
                   color: 'var(--text-secondary)',
                   cursor: 'pointer'
                 }}
               >
-                <MessageSquarePlus size={17} />
+                <MessageSquarePlus size={20} />
               </button>
             </div>
 
             {directConversations.length === 0 ? (
               <button
                 type="button"
-                onClick={onOpenNewDirectMessage}
-                style={{ width: '100%', padding: '10px 12px', border: 0, borderRadius: '10px', background: 'transparent', color: 'var(--text-muted)', fontSize: '12.5px', textAlign: 'left', cursor: 'pointer' }}
+                onClick={handleOpenNewDM}
+                style={{ width: '100%', minHeight: '44px', padding: '12px 14px', border: 0, borderRadius: '12px', background: 'transparent', color: 'var(--text-muted)', fontSize: '13.5px', textAlign: 'left', cursor: 'pointer' }}
               >
                 Start a private conversation
               </button>
@@ -254,13 +284,14 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
                       type="button"
                       onClick={() => handleSelectDirectConversation(conversation)}
                       aria-current={isActive ? 'page' : undefined}
+                      aria-label={`Chat with ${conversation.peer.displayName}`}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '10px',
+                        gap: '12px',
                         width: '100%',
                         minHeight: '58px',
-                        padding: '8px 10px',
+                        padding: '10px 12px',
                         borderRadius: '12px',
                         border: isActive ? '1px solid rgba(59, 130, 246, 0.4)' : '1px solid transparent',
                         background: isActive ? 'var(--bg-card-hover)' : 'transparent',
@@ -271,14 +302,14 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
                     >
                       <Avatar src={conversation.peer.photoURL} name={conversation.peer.displayName} status={conversation.peer.status} size="sm" />
                       <span style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '13.5px', fontWeight: isUnread ? 800 : 650 }}>
+                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '15px', fontWeight: isUnread ? 800 : 650 }}>
                           {conversation.peer.displayName}
                         </span>
-                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px', color: isUnread ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: '11.5px', fontWeight: isUnread ? 650 : 400 }}>
+                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '3px', color: isUnread ? 'var(--text-secondary)' : 'var(--text-muted)', fontSize: '13px', fontWeight: isUnread ? 650 : 400 }}>
                           {preview}
                         </span>
                       </span>
-                      {isUnread && <span aria-label="Unread message" style={{ width: '9px', height: '9px', flexShrink: 0, borderRadius: '50%', background: 'var(--accent-primary, #2563eb)' }} />}
+                      {isUnread && <span aria-label="Unread message" style={{ width: '10px', height: '10px', flexShrink: 0, borderRadius: '50%', background: 'var(--accent-primary, #2563eb)' }} />}
                     </button>
                   );
                 })}
@@ -291,8 +322,8 @@ export const ChannelsSidebar: React.FC<ChannelsSidebarProps> = ({
       {/* Bottom User Profile Section */}
       <UserProfileBar
         user={currentUser}
-        onOpenAccountModal={onOpenAccountModal}
-        onOpenAuthModal={onOpenAuthModal}
+        onOpenAccountModal={handleOpenAccount}
+        onOpenAuthModal={handleOpenAuth}
       />
     </aside>
   );

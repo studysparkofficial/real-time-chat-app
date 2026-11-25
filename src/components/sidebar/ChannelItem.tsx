@@ -21,6 +21,7 @@ export const ChannelItem: React.FC<ChannelItemProps> = ({
     <button
       type="button"
       onClick={() => onSelect(room.id)}
+      aria-label={`Select channel ${room.name}`}
       style={{
         width: '100%',
         display: 'flex',
@@ -49,14 +50,14 @@ export const ChannelItem: React.FC<ChannelItemProps> = ({
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
         <span
           style={{
-            fontSize: isEmojiIcon ? '20px' : '18px',
+            fontSize: isEmojiIcon ? '22px' : '20px',
             color: isActive ? 'var(--accent-primary)' : 'var(--text-muted)',
             display: 'flex',
             alignItems: 'center',
             flexShrink: 0
           }}
         >
-          {isEmojiIcon ? room.icon : <Hash size={19} />}
+          {isEmojiIcon ? room.icon : <Hash size={22} />}
         </span>
         <span
           style={{
