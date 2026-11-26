@@ -191,11 +191,6 @@ export interface CallSession {
   endedReason?: 'completed' | 'declined' | 'timeout' | 'canceled' | 'busy' | 'network_error';
 }
 
-export interface ChimeMeetingCredentials {
-  Meeting: any;
-  Attendee: any;
-}
-
 export interface CallHistoryItem {
   id: string;
   peer: CallParticipant;

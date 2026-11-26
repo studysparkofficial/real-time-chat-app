@@ -33,7 +33,6 @@ export default defineConfig({
           vendor: ['react', 'react-dom'],
           firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
           virtual: ['@tanstack/react-virtual'],
-          chime: ['amazon-chime-sdk-js'],
         },
       },
     },

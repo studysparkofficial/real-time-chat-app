@@ -5,7 +5,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 import { Server } from 'socket.io';
-import { createCallRouter } from './backend/callRoutes.js';
 import { createMediaRouter } from './backend/mediaRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,9 +23,6 @@ const io = new Server(server, {
   },
   maxHttpBufferSize: 1e7 // 10MB limit for file/image uploads
 });
-
-// Mount Chime SDK calling API router
-app.use('/api/calls', createCallRouter());
 
 // Mount AWS S3 media upload/download router with full CORS support
 const mediaRouter = createMediaRouter();
